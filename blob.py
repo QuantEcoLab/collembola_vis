@@ -35,7 +35,7 @@ for slika_path in slike:
 
     blobs = blob_log(gray, **blob_kwargs)
     blobs[:, 2] *= sqrt(2)
-
+    # umjesto ovoga treba napraviti crtanje kruga na slici
     mask = np.zeros_like(gray, dtype=np.uint8)
     for y, x, r in blobs:
         yy, xx = int(round(y)), int(round(x))
