@@ -2,12 +2,18 @@
 import numpy as np
 import skimage.io
 from skimage.color import rgb2gray
-from skimage.feature import blob_log
+from skimage.feature import blob_log, blob_dog, blob_doh
 from math import sqrt
 from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 from tqdm import tqdm
+from skimage.filters import threshold_local
+from skimage.morphology import remove_small_objects
+from skimage.segmentation import clear_border, watershed
+from skimage.feature import peak_local_max
+from scipy import ndimage as ndi
+from skimage import exposure
 
 # blob.py (ovo u C:\Users\HP\PycharmProjects\Collembole\blob.py)
 BASE_DIR = Path(__file__).resolve().parent
@@ -32,24 +38,58 @@ for slika_path in slike:
     img = skimage.io.imread(str(slika_path))
     gray = rgb2gray(img)
 
-    # detekcija blobova
-    blobs = blob_log(gray, **blob_kwargs)
-    blobs[:, 2] *= sqrt(2)
+    # Enhance contrast using histogram equalization
+    print("   pojačavam kontrast...")
+    gray_eq = exposure.equalize_adapthist(gray, clip_limit=0.03)
 
-    # crtanje slike i blobova pomoću matplotlib-a
+    # Local binarization (adaptive thresholding) with adjusted parameters
+    print("   lokalna binarizacija...")
+    block_size = 51  # Larger block size for more global context
+    offset = 0.01    # Lower offset for faint features
+    local_thresh = threshold_local(gray_eq, block_size, offset=offset)
+    binary_local = gray_eq > local_thresh
+
+    # Visualize and save the binary mask for debugging
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.imshow(img)
-    for y, x, r in tqdm(blobs):
-        circ = Circle((x, y), r, edgecolor='red', facecolor='none', linewidth=2)
-        ax.add_patch(circ)
-
+    ax.imshow(binary_local, cmap='gray')
+    ax.set_title('Binary mask after thresholding')
     ax.set_axis_off()
     plt.tight_layout(pad=0)
-
-    # spremi rezultat
-    out_path = out_dir / f"{slika_path.stem}_overlay.png"
+    out_path = out_dir / f"{slika_path.stem}_binary_debug.png"
     fig.savefig(str(out_path), bbox_inches='tight', pad_inches=0)
     plt.close(fig)
     print(f"   snimljeno → {out_path.name}")
 
+    # Clean up the binary image with lower min_size
+    binary_local = remove_small_objects(binary_local, min_size=10)
+    binary_local = clear_border(binary_local)
+
+    # Compute distance map for watershed
+    print("   priprema watershed segmentacije...")
+    distance = ndi.distance_transform_edt(binary_local)
+    coords = peak_local_max(distance, footprint=np.ones((3, 3)), labels=binary_local)
+    mask = np.zeros(distance.shape, dtype=bool)
+    mask[tuple(coords.T)] = True
+    markers, _ = ndi.label(mask)
+    labels = watershed(-distance, markers, mask=binary_local)
+
+    # Overlay watershed boundaries on the image
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.imshow(img)
+    ax.imshow(labels, alpha=0.3, cmap='nipy_spectral')  # Overlay segmentation
+
+    # Optionally, draw contours or boundaries
+    # from skimage.segmentation import find_boundaries
+    # boundaries = find_boundaries(labels)
+    # ax.imshow(boundaries, cmap='hot', alpha=0.5)
+
+    ax.set_axis_off()
+    plt.tight_layout(pad=0)
+
+    # Save result
+    out_path = out_dir / f"{slika_path.stem}_watershed.png"
+    fig.savefig(str(out_path), bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+    print(f"   snimljeno → {out_path.name}")
+    break
 print("'masks'")
