@@ -15,6 +15,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 from tqdm import tqdm
+import json
 
 # Load and display the image
 image_path = "data/slike/K1_Fe2O3001 (1).jpg"
@@ -189,25 +190,44 @@ for i, obj in enumerate(detected_objects):
     cropped_img = crop_to_bbox_with_padding(image, x, y, crop_w, crop_h)
     crop_path = output_dir / f"detected_object_{i}.jpg"
     sk.io.imsave(crop_path, cropped_img)
-    # Check if this crop matches any Collembola (using previous matching logic)
-    is_collembola = False
+    # Calculate top-left corner of crop in original image
+    H, W = image.shape[:2]
+    x1 = int(x - crop_w // 2)
+    y1 = int(y - crop_h // 2)
+    # Calculate relative coordinates (clipped to [0,1])
+    rel_x = max(0, min(1, x1 / W))
+    rel_y = max(0, min(1, y1 / H))
+    # Find all collembola centers inside this crop
     matches = target_collembola_df[
-        (target_collembola_df["center_x"] >= x - crop_w / 2) &
-        (target_collembola_df["center_x"] <= x + crop_w / 2) &
-        (target_collembola_df["center_y"] >= y - crop_h / 2) &
-        (target_collembola_df["center_y"] <= y + crop_h / 2)
+        (target_collembola_df["center_x"] >= x1) &
+        (target_collembola_df["center_x"] <= x1 + crop_w) &
+        (target_collembola_df["center_y"] >= y1) &
+        (target_collembola_df["center_y"] <= y1 + crop_h)
     ]
-    if not matches.empty:
-        is_collembola = True
+    is_collembola = not matches.empty
+    # Prepare lists of centers
+    abs_centers = matches[["center_x", "center_y"]].values.tolist()
+    rel_centers = [
+        [
+            max(0, min(1, (cx - x1) / crop_w)),
+            max(0, min(1, (cy - y1) / crop_h))
+        ]
+        for cx, cy in abs_centers
+    ]
     csv_rows.append({
         'crop_id': str(crop_path),
-        'collembola': is_collembola
+        'collembola': is_collembola,
+        'rel_x': rel_x,
+        'rel_y': rel_y,
+        'collembola_centers_abs': json.dumps(abs_centers),
+        'collembola_centers_rel': json.dumps(rel_centers)
     })
 
 # Save CSV
+output_dir = Path("data")
 csv_path = output_dir / "crops_dataset.csv"
 with open(csv_path, 'w', newline='') as csvfile:
-    writer = csv.DictWriter(csvfile, fieldnames=['crop_id', 'collembola'])
+    writer = csv.DictWriter(csvfile, fieldnames=['crop_id', 'collembola', 'rel_x', 'rel_y', 'collembola_centers_abs', 'collembola_centers_rel'])
     writer.writeheader()
     writer.writerows(csv_rows)
 print(f"Saved crop dataset CSV to {csv_path}")
