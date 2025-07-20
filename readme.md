@@ -22,5 +22,5 @@ Imamo tri slike sa skokunima, - zadatak je izraditi program za segmentaciju skok
 	3. Grounded-SAM 2
 	4. VLLM
 
-
+Zadatak: 20. srpanj
 U pythonu funkcija za izračun volumena valjka (širina i dužina).
