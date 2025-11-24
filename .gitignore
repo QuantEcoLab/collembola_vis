@@ -26,3 +26,6 @@ collembolas*/*.jpg
 
 # Python cache
 __pycache__/
+
+# Model checkpoints (use external storage / releases)
+checkpoints/
