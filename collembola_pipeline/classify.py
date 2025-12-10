@@ -10,7 +10,7 @@ from PIL import Image
 from .config import CLASSIFIER_PATH, CLASSIFIER_THRESHOLD
 
 
-def get_val_transform(img_size: int = 128):
+def get_val_transform(img_size: int = 224):
     return transforms.Compose([
         transforms.Resize((img_size, img_size)),
         transforms.ToTensor(),

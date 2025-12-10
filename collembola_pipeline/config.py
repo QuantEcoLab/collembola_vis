@@ -19,7 +19,7 @@ CLASSIFIER_PATH = MODELS_DIR / "classifier_resnet18.pt"
 # Optimized based on K1 TP/FP analysis: removes 44% of FPs while keeping 89% recall
 # Previous: 0.9 (P=42.7%, R=79.2%, F1=55.5%)
 # New: 0.99 (P=54.2%, R=89.1%, F1=67.4% when combined with eccentricity filter)
-CLASSIFIER_THRESHOLD: float = 0.99
+CLASSIFIER_THRESHOLD: float = 0.97
 
 # SAM
 SAM_CHECKPOINT = Path("checkpoints/sam_vit_b.pth")
@@ -33,16 +33,17 @@ SAM_AUTOMASK_PARAMS = dict(
 )
 
 # Optional per-device overrides for SAM AutoMask to boost recall
+# Balanced settings for high-resolution processing without CUDA OOM
 SAM_AUTOMASK_GPU_PARAMS = dict(
-    points_per_side=32,
-    points_per_batch=16,
-    pred_iou_thresh=0.70,
-    stability_score_thresh=0.85,
-    min_mask_region_area=10,
-    crop_n_layers=0,
-    crop_overlap_ratio=0.5,
+    points_per_side=48,  # balanced grid density (48^2 = 2304 points)
+    points_per_batch=32,  # reduced batch size to fit in VRAM
+    pred_iou_thresh=0.60,  # lower threshold for better recall
+    stability_score_thresh=0.80,  # relaxed for difficult specimens
+    min_mask_region_area=50,  # filter tiny noise while keeping small organisms
+    crop_n_layers=0,  # disabled to avoid CUDA OOM on large images (use tiling instead)
+    crop_overlap_ratio=512/1500,  # ~0.34 overlap for better edge coverage
     crop_n_points_downscale_factor=2,
-    box_nms_thresh=0.7,
+    box_nms_thresh=0.5,  # lower NMS for denser detections
 )
 SAM_AUTOMASK_CPU_PARAMS = dict(
     points_per_side=48,
@@ -64,8 +65,9 @@ DEFAULT_DEVICE = "cuda"  # prefer GPU when available
 DOWNSCALE_MAX_SIDE: int = 1024
 
 # GPU tiling for SAM on very large plates
-TILE_MAX_SIDE: int = 2304  # process larger images in overlapping tiles on GPU
-TILE_OVERLAP: int = 192  # pixels of overlap between tiles
+# Tile size tuned to fit in 44GB VRAM with points_per_side=48
+TILE_MAX_SIDE: int = 4096  # process in 4K tiles for memory safety
+TILE_OVERLAP: int = 512  # increased overlap to reduce edge artifacts
 
 # Post-classification morphology filters (tunable)
 MIN_AREA_PX: int = 200
@@ -79,7 +81,7 @@ MAX_MINOR_PX: int = 250
 # - MIN_ECCENTRICITY increased from 0.70 to 0.89 (removes rounder false positives)
 # - Targets 89% recall with 54% precision (F1=67.4%)
 MIN_SOLIDITY: float = 0.60  # Keep conservative (TP min=0.632)
-MIN_ECCENTRICITY: float = 0.89  # Data-driven: removes 44% FPs, keeps 89% recall
+MIN_ECCENTRICITY: float = 0.86  # Slightly relaxed to recover recall on difficult plates
 MIN_ASPECT_RATIO: float = 0.08  # minor/major
 MAX_ASPECT_RATIO: float = 0.65
 
