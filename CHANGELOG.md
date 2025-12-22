@@ -2,6 +2,82 @@
 
 All notable changes to the Collembola Detection Pipeline.
 
+## [3.0.0] - 2024-12-10 - Complete End-to-End Pipeline (PRODUCTION READY)
+
+### 🎉 Production-Ready Milestone
+Complete automated pipeline from image → measurements with automatic ruler calibration, YOLO detection, fast morphological measurements, and validation visualizations.
+
+### Added
+- **Master Pipeline Script** (`scripts/process_single_image.py`)
+  - Single command processes entire workflow: calibration → detection → measurement → visualization
+  - Automatic ruler calibration with fallback to default (8.666 µm/px)
+  - Progress tracking with detailed terminal output
+  - Error handling with graceful fallback
+  - Processing time: ~30-60 seconds per 10K×10K image
+
+- **Automatic Ruler Calibration** (`scripts/calibrate_ruler_auto.py`)
+  - Detects WHITE ruler ticks in fixed region (x=4000-9000, y=1500-3000)
+  - Identifies major ticks (5mm intervals) and minor ticks (~1mm)
+  - Validates spacing consistency (<15% variation)
+  - Output: calibration JSON + visual validation PNG
+  - **Result**: 8.666 µm/pixel (577 px/cm, 1.3% variation)
+
+- **Fast Measurement Pipeline** (`scripts/measure_organisms_fast.py`)
+  - Ellipse fitting via eigenvalue decomposition (orientation-invariant)
+  - Performance: **178 organisms/second**
+  - Measurements: length, width, area, volume (cylinder model)
+  - Shape descriptors: eccentricity, solidity
+  - Output: measurements CSV + metadata JSON
+
+- **Validation Visualizations** (`scripts/visualize_measurements.py`)
+  - Overview: All organisms with color-coded bounding boxes (green/yellow/red by size)
+  - Samples: Grid of 50 organisms with detailed measurements
+  - Annotations: length×width, area, volume, confidence
+  - Output: overview PNG (8000×7946) + samples PNG
+
+- **Comprehensive Documentation** (`WORKFLOW.md`)
+  - Quick start guide with one-command usage
+  - Detailed pipeline step descriptions
+  - Command-line options and examples
+  - Batch processing templates
+  - Troubleshooting guide
+  - Performance benchmarks
+
+### Output Files (Flat Structure)
+All files saved with image name as prefix:
+- `*_calibration.json` - Ruler calibration data
+- `*_ruler_analysis.png` - Visual validation of ruler detection
+- `*_detections.csv` - YOLO bounding boxes
+- `*_measurements.csv` - **Primary output**: morphological measurements
+- `*_metadata.json` - Processing metadata
+- `*_overview.png` - All organisms with bounding boxes
+- `*_samples.png` - Grid of 50 sample organisms
+- `*_overlay.jpg` - YOLO detection overlay
+- `*_measurements_metadata.json` - Measurement statistics
+
+### Performance
+**Test Image**: K1_Fe2O3001 (1).jpg (10408×10338 pixels)
+- Calibration: 8.666 µm/px (automatic, 9 major ticks detected)
+- Organisms detected: 746
+- Mean length: 888.7 µm
+- Mean width: 235.0 µm
+- Mean confidence: 0.859
+- **Total processing time: 38.4 seconds**
+
+### Changed
+- Unified pipeline: all scripts work together seamlessly
+- Flat file structure (no subdirectories)
+- Consistent naming: all outputs prefixed with image name
+- CSV/JSON output (no Excel)
+- Automatic calibration with fallback
+
+### Fixed
+- Column name conflicts in measurement visualization (confidence_det vs confidence_meas)
+- Output path handling for measurement script (file vs directory)
+- Detection ID synchronization between CSVs
+
+---
+
 ## [2.0.0] - 2024-12-10 - Tiled YOLO Pipeline (MAJOR MILESTONE)
 
 ### 🎉 Major Achievement

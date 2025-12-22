@@ -38,6 +38,61 @@ python scripts/infer_tiled.py \
 - `K1_Fe2O3001 (1)_overlay.jpg` - Visualization with bounding boxes
 - `K1_Fe2O3001 (1)_metadata.json` - Inference parameters and statistics
 
+### 3. Measure Morphological Properties
+
+**Option A: Fast Method (Recommended)** - 186× faster, ellipse fitting
+```bash
+python scripts/measure_organisms_fast.py \
+    --image "data/slike/K1_Fe2O3001 (1).jpg" \
+    --detections infer_tiled_output/K1_detections.csv \
+    --um-per-pixel 8.57
+```
+- **Speed**: ~4 seconds for 746 organisms (178 org/sec)
+- **Method**: Adaptive threshold → ellipse fitting → morphology
+- **Use case**: Production, large-scale processing
+
+**Option B: SAM Method** - Maximum accuracy, slower
+```bash
+python scripts/measure_organisms.py \
+    --image "data/slike/K1_Fe2O3001 (1).jpg" \
+    --detections infer_tiled_output/K1_detections.csv \
+    --um-per-pixel 8.57 \
+    --device cuda
+```
+- **Speed**: ~13 minutes for 746 organisms (1 org/sec)
+- **Method**: SAM segmentation → precise masks → morphology
+- **Use case**: Research, maximum precision needed
+
+**Output** (in `measurements/`):
+- `K1_measurements.csv` - Body length, width, area, volume for each organism
+- `K1_measurements_metadata.json` - Summary statistics (mean length, total volume, etc.)
+
+**Measurements include:**
+- Body length (µm) - major axis from segmentation
+- Body width (µm) - minor axis from segmentation
+- Area (µm²) - segmented area in square micrometers
+- Volume (µm³) - cylinder model: V = π × r² × h
+- Morphological features: eccentricity, solidity, perimeter
+
+### 4. Batch Process Multiple Plates
+
+```bash
+python scripts/process_plate_batch.py \
+    --images "data/slike/*.jpg" \
+    --model models/yolo11n_tiled_best.pt \
+    --um-per-pixel 8.57 \
+    --output-dir outputs/batch_20251210
+```
+
+**Output structure:**
+```
+outputs/batch_20251210/
+├── detections/           # YOLO detection CSVs
+├── measurements/         # Morphological measurements CSVs
+├── overlays/             # Visualization images
+└── batch_config.json     # Batch processing configuration
+```
+
 ## 📊 Performance
 
 ### Model Metrics (Best Epoch: 82)
@@ -70,19 +125,34 @@ python scripts/infer_tiled.py \
 
 ### Core Scripts
 
+**Detection Pipeline:**
 1. **`scripts/convert_imagej_rois.py`** - Extract ImageJ ROI annotations to CSV
 2. **`scripts/create_tiled_dataset.py`** - Tile images and create YOLO dataset
 3. **`scripts/train_yolo_tiled.py`** - Multi-GPU training script
 4. **`scripts/infer_tiled.py`** - Tiled inference with NMS merging
 
+**Measurement Pipeline:**
+5. **`scripts/calibrate_ruler.py`** - Interactive ruler calibration (µm/pixel)
+6. **`scripts/measure_organisms_fast.py`** - Fast ellipse fitting (178 org/sec) ⚡ **Recommended**
+7. **`scripts/measure_organisms.py`** - SAM segmentation (1 org/sec, max accuracy)
+8. **`scripts/process_plate_batch.py`** - Batch process multiple plates (detection + measurement)
+
 ### Key Features
 
+**Detection:**
 - ✅ **Tiled Processing**: Handles ultra-high-resolution images without downscaling
 - ✅ **Multi-GPU Training**: Distributed training on 4 GPUs with DDP
 - ✅ **Overlap Handling**: 256px overlap between tiles prevents edge artifacts
 - ✅ **Global NMS**: Merges detections across tile boundaries
 - ✅ **Confidence Filtering**: Adjustable confidence thresholds
 - ✅ **Metadata Tracking**: Full provenance of tiles and detections
+
+**Measurement:**
+- ✅ **SAM Segmentation**: Precise organism masks using Segment Anything Model
+- ✅ **Morphological Analysis**: Length, width, area, volume, eccentricity, solidity
+- ✅ **Cylinder Volume Model**: V = π × r² × h for accurate volume estimation
+- ✅ **Auto-Calibration**: Interactive ruler detection for µm/pixel calibration
+- ✅ **Batch Processing**: Process multiple plates with single command
 
 ## 📁 Project Structure
 
@@ -92,20 +162,114 @@ collembola_vis/
 │   ├── convert_imagej_rois.py       # ROI extraction from ImageJ
 │   ├── create_tiled_dataset.py      # Tiled dataset creation
 │   ├── train_yolo_tiled.py          # Multi-GPU training
-│   └── infer_tiled.py               # Tiled inference
+│   ├── infer_tiled.py               # Tiled inference
+│   ├── calibrate_ruler.py           # Interactive ruler calibration
+│   ├── measure_organisms.py         # SAM segmentation + measurements
+│   ├── process_plate_batch.py       # Batch processing (detection + measurement)
+│   └── analyze_ruler.py             # Ruler location analysis helper
 ├── models/
 │   └── yolo11n_tiled_best.pt        # Best trained model (99.2% mAP@0.5)
+├── checkpoints/
+│   └── sam_vit_b.pth                # SAM model checkpoint (358MB)
 ├── data/
 │   ├── training_data/               # ImageJ ROI annotations (20 plates)
 │   ├── annotations/                 # Extracted ROI CSV
 │   ├── yolo_tiled/                  # Tiled YOLO dataset
-│   └── slike/                       # Production images for inference
+│   ├── slike/                       # Production images for inference
+│   └── calibration/                 # Ruler calibration data
+├── outputs/
+│   ├── detections/                  # YOLO detection CSVs
+│   ├── measurements/                # Morphological measurements CSVs
+│   └── overlays/                    # Visualization images
 ├── runs/detect/
 │   └── train_tiled_1280_20251210_115016/  # Training run with best model
 ├── archive_old_scripts/             # Deprecated scripts (SAM, classical methods)
 ├── archive_training_runs/           # Old training attempts
 ├── archive_models/                  # Old non-tiled models
 └── archive_outputs/                 # Previous inference outputs
+```
+
+## 📏 Measurement Workflow
+
+### Complete Pipeline: Detection → Measurement
+
+```bash
+# Step 1: Run tiled YOLO detection
+python scripts/infer_tiled.py \
+    --image "data/slike/K1_Fe2O3001 (1).jpg" \
+    --model models/yolo11n_tiled_best.pt \
+    --output infer_tiled_output \
+    --device cuda
+
+# Step 2: Calibrate ruler (one-time per microscope setup)
+python scripts/calibrate_ruler.py \
+    --image "data/slike/K1_Fe2O3001 (1).jpg" \
+    --ruler-mm 10
+
+# Step 3: Measure organisms (fast method - recommended)
+python scripts/measure_organisms_fast.py \
+    --image "data/slike/K1_Fe2O3001 (1).jpg" \
+    --detections infer_tiled_output/K1_Fe2O3001_(1)_detections.csv \
+    --um-per-pixel 8.57
+
+# Alternative: SAM method for maximum accuracy (186× slower)
+# python scripts/measure_organisms.py \
+#     --image "data/slike/K1_Fe2O3001 (1).jpg" \
+#     --detections infer_tiled_output/K1_Fe2O3001_(1)_detections.csv \
+#     --um-per-pixel 8.57 \
+#     --device cuda
+```
+
+### Batch Processing
+
+Process all plates in a directory:
+
+```bash
+python scripts/process_plate_batch.py \
+    --images "data/slike/*.jpg" \
+    --model models/yolo11n_tiled_best.pt \
+    --um-per-pixel 8.57 \
+    --output-dir outputs/batch_experiment_1 \
+    --device cuda
+```
+
+### Measurement Output
+
+**CSV Format** (`measurements/*.csv`):
+
+| Column | Description | Unit |
+|--------|-------------|------|
+| `detection_id` | Unique organism ID | - |
+| `bbox_x1, bbox_y1, bbox_x2, bbox_y2` | Bounding box coordinates | pixels |
+| `centroid_x_px, centroid_y_px` | Organism centroid | pixels |
+| `length_um` | Body length (major axis) | µm |
+| `width_um` | Body width (minor axis) | µm |
+| `area_um2` | Segmented area | µm² |
+| `volume_um3` | Cylinder model volume | µm³ |
+| `eccentricity` | Shape elongation (0-1) | - |
+| `solidity` | Convexity measure | - |
+| `confidence` | YOLO detection confidence | - |
+| `mask_available` | SAM segmentation success | boolean |
+
+**Example measurements:**
+```csv
+detection_id,length_um,width_um,area_um2,volume_um3
+0,1960.89,673.99,1006929.58,699597349.21
+1,2950.53,952.20,1774722.56,2101086027.68
+2,2598.03,553.45,1071634.54,625021256.24
+```
+
+**Summary Statistics** (`measurements/*_metadata.json`):
+
+```json
+{
+  "image_path": "data/slike/K1_Fe2O3001 (1).jpg",
+  "num_organisms": 800,
+  "mean_length_um": 2221.2,
+  "mean_width_um": 719.6,
+  "total_volume_um3": 9683963333.1,
+  "um_per_pixel": 8.57
+}
 ```
 
 ## 🎓 Training Your Own Model

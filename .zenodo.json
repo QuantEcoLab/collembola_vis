@@ -1,0 +1,39 @@
+{
+  "title": "YOLO11n Collembola Detection Model - Tiled Inference for Ultra-High-Resolution Microscope Images",
+  "description": "A YOLO11n model (2.59M parameters, 5.4MB) trained for detecting collembola organisms in 10K×10K microscope images using tiled inference. Achieves 99.2% mAP@0.5, 97.8% precision, and 97.1% recall on validation data. Trained on 14,125 ImageJ ROI annotations from 20 microscope plates using 4× Quadro RTX 8000 GPUs. The model processes ultra-high-resolution images by tiling them into 1280×1280 patches with 256px overlap, then merges detections with global NMS - this approach is 2.5× better than downscaling while preserving all details.",
+  "creators": [
+    {
+      "name": "Zovko, Jana",
+      "affiliation": "University of Osijek, Department of Biology"
+    },
+    {
+      "name": "Hackenberger, Domagoj K.",
+      "affiliation": "University of Osijek, Department of Biology"
+    }
+  ],
+  "keywords": [
+    "YOLO11",
+    "object detection",
+    "collembola",
+    "microscopy",
+    "deep learning",
+    "computer vision",
+    "tiled inference",
+    "ultra-high-resolution",
+    "ecology",
+    "biodiversity"
+  ],
+  "license": "cc-by-nc-4.0",
+  "upload_type": "dataset",
+  "access_right": "open",
+  "related_identifiers": [
+    {
+      "relation": "isSupplementTo",
+      "identifier": "https://github.com/QuantEcoLab/collembolae_vis",
+      "resource_type": "software"
+    }
+  ],
+  "version": "1.0.0",
+  "language": "eng",
+  "notes": "Model trained on collembola body annotations (without antennae and furca). Best used with confidence threshold ≥ 0.6. Requires tiled inference for images larger than 1280×1280 pixels. See MODEL_CARD.md and README.md for usage instructions."
+}
