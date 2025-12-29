@@ -1,5 +1,9 @@
 # Collembola Detection Pipeline
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![YOLO11](https://img.shields.io/badge/YOLO-11-00FFFF.svg)](https://github.com/ultralytics/ultralytics)
+
 High-performance YOLO-based detection pipeline for collembola organisms in ultra-high-resolution microscope images (10K×10K pixels) using tiled inference and multi-GPU training.
 
 ## 🎯 Overview
@@ -158,35 +162,49 @@ outputs/batch_20251210/
 
 ```
 collembola_vis/
-├── scripts/                          # Active pipeline scripts
+├── scripts/                          # Core pipeline scripts
 │   ├── convert_imagej_rois.py       # ROI extraction from ImageJ
 │   ├── create_tiled_dataset.py      # Tiled dataset creation
 │   ├── train_yolo_tiled.py          # Multi-GPU training
 │   ├── infer_tiled.py               # Tiled inference
 │   ├── calibrate_ruler.py           # Interactive ruler calibration
 │   ├── measure_organisms.py         # SAM segmentation + measurements
-│   ├── process_plate_batch.py       # Batch processing (detection + measurement)
-│   └── analyze_ruler.py             # Ruler location analysis helper
+│   ├── measure_organisms_fast.py    # Fast ellipse-based measurements
+│   ├── process_plate_batch.py       # Batch processing
+│   └── monitor_batch.sh             # Batch monitoring utility
+├── collembola_pipeline/             # Python package for pipeline modules
+│   ├── detect_organisms.py          # Detection utilities
+│   ├── detect_plate.py              # Plate detection
+│   ├── morphology.py                # Morphological analysis
+│   └── ...                          # Other pipeline modules
 ├── models/
 │   └── yolo11n_tiled_best.pt        # Best trained model (99.2% mAP@0.5)
-├── checkpoints/
-│   └── sam_vit_b.pth                # SAM model checkpoint (358MB)
-├── data/
-│   ├── training_data/               # ImageJ ROI annotations (20 plates)
+├── docs/                            # Documentation
+│   ├── QUICKSTART.md                # Quick start guide
+│   ├── WORKFLOW.md                  # Detailed workflow
+│   ├── MEASUREMENT_METHODS.md       # Measurement documentation
+│   ├── PERFORMANCE.md               # Performance metrics
+│   ├── TROUBLESHOOTING.md           # Common issues
+│   ├── MODEL_CARD.md                # Model card
+│   ├── HUGGINGFACE_README.md        # HuggingFace documentation
+│   └── CHANGELOG.md                 # Version history
+├── data/                            # Data directory (see .gitignore)
+│   ├── training_data/               # ImageJ ROI annotations
 │   ├── annotations/                 # Extracted ROI CSV
 │   ├── yolo_tiled/                  # Tiled YOLO dataset
-│   ├── slike/                       # Production images for inference
-│   └── calibration/                 # Ruler calibration data
-├── outputs/
-│   ├── detections/                  # YOLO detection CSVs
-│   ├── measurements/                # Morphological measurements CSVs
-│   └── overlays/                    # Visualization images
-├── runs/detect/
-│   └── train_tiled_1280_20251210_115016/  # Training run with best model
-├── archive_old_scripts/             # Deprecated scripts (SAM, classical methods)
-├── archive_training_runs/           # Old training attempts
-├── archive_models/                  # Old non-tiled models
-└── archive_outputs/                 # Previous inference outputs
+│   └── slike/                       # Production images
+├── outputs/                         # Generated outputs (see .gitignore)
+├── runs/                            # Training runs (see .gitignore)
+├── checkpoints/                     # Model checkpoints (see .gitignore)
+└── archive/                         # Historical development materials
+    ├── scripts/                     # Deprecated scripts
+    ├── models/                      # Old model checkpoints
+    ├── training_runs/               # Previous training runs
+    ├── outputs/                     # Old inference outputs
+    ├── datasets/                    # Old datasets
+    ├── template_approach/           # SAM template experiments
+    ├── unused/                      # Miscellaneous archived files
+    └── README.md                    # Archive documentation
 ```
 
 ## 📏 Measurement Workflow
@@ -428,13 +446,36 @@ python scripts/train_yolo_tiled.py --batch 16 --device 0,1,2,3
 - **Images**: `data/slike/`
 - **Reference Annotations**: `data/collembolas_table.csv` (manual counts from 3 plates)
 
-## 🎯 Future Improvements
+## 🎯 Roadmap & Future Improvements
 
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+### High Priority
 - [ ] Implement instance segmentation (YOLO-seg) for precise boundaries
-- [ ] Add morphological measurements (length, width, area)
-- [ ] Export to multiple formats (COCO, Pascal VOC)
 - [ ] Web interface for batch processing
 - [ ] Automated quality control and validation
+- [ ] Export to multiple formats (COCO, Pascal VOC, ImageJ ROIs)
+
+### Enhancements
+- [ ] Multi-species classification
+- [ ] Interactive annotation tools
+- [ ] Cloud deployment support (Docker, Kubernetes)
+- [ ] Real-time video processing
+- [ ] Enhanced visualization dashboard
+
+### Documentation
+- [ ] Tutorial notebooks
+- [ ] Video walkthroughs
+- [ ] API documentation
+- [ ] Use case examples
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
+- How to report issues
+- How to submit pull requests
+- Development setup
+- Code style guidelines
 
 ## 📖 Citation
 
@@ -445,16 +486,28 @@ python scripts/train_yolo_tiled.py --batch 16 --device 0,1,2,3
 
 ## 📝 License
 
-Research use only. See repository for details.
+This project is licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** - see the [LICENSE](LICENSE) file for details.
+
+**Why AGPL-3.0?** This project uses Ultralytics YOLO, which is licensed under AGPL-3.0. As a derivative work, this project must also use AGPL-3.0.
+
+**Key Points:**
+- You can freely use, modify, and distribute this software
+- If you modify and distribute this software, you must release your modifications under AGPL-3.0
+- If you run a modified version on a server, you must make the source code available to users
+- For commercial use without AGPL requirements, contact Ultralytics for commercial licensing options
 
 ---
 
 ## 🗂️ Archived Components
 
-Previous approaches (SAM-based, classical CV, downscaled YOLO) are archived in:
-- `archive_old_scripts/` - SAM templates, classical segmentation methods
-- `archive_training_runs/` - Non-tiled training attempts
-- `archive_models/` - Downscaled YOLO models (39.6% mAP)
-- `archive_outputs/` - Previous inference results
+Previous approaches (SAM-based, classical CV, downscaled YOLO) and development artifacts are archived in the `archive/` directory. This includes:
 
-These are kept for reference but **not recommended for production use**.
+- **scripts/** - Deprecated scripts (SAM templates, classical segmentation methods)
+- **training_runs/** - Non-tiled training attempts
+- **models/** - Downscaled YOLO models (39.6% mAP)
+- **outputs/** - Previous inference results
+- **template_approach/** - SAM template-based detection experiments
+- **zenodo_upload/** - Model package for Zenodo repository
+- **upload_scripts/** - Scripts for uploading to HuggingFace and Zenodo
+
+See `archive/README.md` for detailed information about archived materials. These are kept for historical reference but **not recommended for production use**.

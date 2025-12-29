@@ -22,11 +22,8 @@ infer_tiled_output/
 # Model checkpoints (use external storage / releases)
 checkpoints/
 
-# Archive directories (large, use git LFS or external storage)
-archive_datasets/
-archive_models/
-archive_training_runs/
-archive_outputs/
+# Archive directory (consolidated from multiple archive_* folders)
+archive/
 
 # Generated files
 *.xlsx
