@@ -1,0 +1,21 @@
+# Core dependencies for Collembola Detection Pipeline
+ultralytics>=8.0.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Computer vision and image processing
+opencv-python>=4.8.0
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Data handling
+pandas>=2.0.0
+
+# Segmentation (optional - only needed for SAM-based measurements)
+segment-anything @ git+https://github.com/facebookresearch/segment-anything.git
+
+# ROI handling
+read-roi>=1.6.0
+
+# Optional: For faster inference
+# onnxruntime-gpu>=1.15.0

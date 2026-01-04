@@ -280,8 +280,8 @@ if __name__ == '__main__':
                         help='Tile size (default: 1280)')
     parser.add_argument('--overlap', type=int, default=256,
                         help='Overlap between tiles (default: 256)')
-    parser.add_argument('--conf', type=float, default=0.25,
-                        help='Confidence threshold (default: 0.25)')
+    parser.add_argument('--conf', type=float, default=0.6,
+                        help='Confidence threshold (default: 0.6)')
     parser.add_argument('--iou', type=float, default=0.5,
                         help='IoU threshold for NMS (default: 0.5)')
     parser.add_argument('--output', type=str, default='infer_tiled_output',
