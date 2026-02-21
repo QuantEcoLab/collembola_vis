@@ -93,6 +93,47 @@ def list_images() -> list[dict]:
     return images
 
 
+def register_server_path(image_path: Path) -> dict:
+    """Register an existing server-side image without copying it.
+
+    Creates a symlink and generates a thumbnail only.
+    Returns the same dict shape as save_upload.
+    """
+    image_id = uuid.uuid4().hex[:12]
+    image_dir = settings.uploads_dir / image_id
+    image_dir.mkdir(parents=True, exist_ok=True)
+
+    # Symlink to the original — no copy
+    link = image_dir / image_path.name
+    link.symlink_to(image_path.resolve())
+
+    Image.MAX_IMAGE_PIXELS = None
+    img = Image.open(image_path)
+    width, height = img.size
+
+    thumbnail_path = image_dir / "thumbnail.jpg"
+    max_side = settings.thumbnail_max_side
+    if max(width, height) > max_side:
+        ratio = max_side / max(width, height)
+        new_size = (int(width * ratio), int(height * ratio))
+        thumb = img.resize(new_size, Image.LANCZOS)
+    else:
+        thumb = img.copy()
+    thumb = thumb.convert("RGB")
+    thumb.save(thumbnail_path, "JPEG", quality=85)
+
+    return {
+        "image_id": image_id,
+        "filename": image_path.name,
+        "path": str(image_path.resolve()),
+        "thumbnail_path": str(thumbnail_path),
+        "width": width,
+        "height": height,
+        "thumbnail_width": thumb.width,
+        "thumbnail_height": thumb.height,
+    }
+
+
 def delete_image(image_id: str) -> bool:
     """Delete an uploaded image and its thumbnail."""
     import shutil

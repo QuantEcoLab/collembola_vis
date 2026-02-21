@@ -44,20 +44,50 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 // Images
-export const uploadImage = async (file: File): Promise<ImageInfo> => {
-  const form = new FormData()
-  form.append('file', file)
-  const res = await fetch(`${BASE}/api/images/upload`, {
-    method: 'POST',
-    body: form,
-    headers: authHeaders(),
+export const uploadImage = (
+  file: File,
+  onProgress?: (pct: number) => void,
+): Promise<ImageInfo> => {
+  return new Promise((resolve, reject) => {
+    const form = new FormData()
+    form.append('file', file)
+
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${BASE}/api/images/upload`)
+
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100))
+      }
+    }
+
+    xhr.onload = () => {
+      if (xhr.status === 401) { handle401(); return }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try { resolve(JSON.parse(xhr.responseText)) }
+        catch { reject(new Error('Invalid server response')) }
+      } else {
+        let detail = `Upload failed (HTTP ${xhr.status})`
+        try { detail = JSON.parse(xhr.responseText).detail || detail } catch {}
+        reject(new Error(detail))
+      }
+    }
+
+    xhr.onerror = () => reject(new Error('Network error — check your connection'))
+    xhr.ontimeout = () => reject(new Error('Upload timed out'))
+
+    xhr.send(form)
   })
-  if (!res.ok) {
-    if (res.status === 401) handle401()
-    throw new Error('Upload failed')
-  }
-  return res.json()
 }
+
+export const registerFromPath = (path: string) =>
+  request<ImageInfo>('/api/images/from-path', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  })
 
 export const listImages = () => request<ImageInfo[]>('/api/images')
 

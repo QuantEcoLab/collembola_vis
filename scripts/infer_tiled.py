@@ -153,31 +153,38 @@ def infer_tiled(
     else:
         output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
-    
+
     image_name = image_path.stem
-    
+
     print(f"Processing: {image_path}")
     print(f"Output directory: {output_dir}")
-    
+
     # Load model
     print(f"\nLoading model: {model_path}")
+    if progress_callback:
+        progress_callback(0.0, "Loading model...")
     model = YOLO(model_path)
-    
+
     # Tile image
     print(f"\nTiling image (tile_size={tile_size}, overlap={overlap})...")
+    if progress_callback:
+        progress_callback(0.04, "Tiling image...")
     img, tiles = tile_image(image_path, tile_size, overlap)
     img_w, img_h = img.size
+    n_tiles = len(tiles)
     print(f"Image size: {img_w}x{img_h}")
-    print(f"Created {len(tiles)} tiles")
-    
+    print(f"Created {n_tiles} tiles")
+
     # Run detection on each tile
     print(f"\nRunning detection on tiles...")
+    if progress_callback:
+        progress_callback(0.07, f"Running detection on {n_tiles} tiles...")
     all_detections = []
-    
+
     for tile_idx, (tile_img, x_offset, y_offset, tile_id) in enumerate(tiles):
-        # Report progress
+        # Report progress (7% → 87% across tile loop)
         if progress_callback:
-            progress_callback(tile_idx / len(tiles), f"Tile {tile_idx + 1}/{len(tiles)}")
+            progress_callback(0.07 + 0.80 * (tile_idx / n_tiles), f"Tile {tile_idx + 1}/{n_tiles}")
 
         # Run YOLO on tile
         results = model(tile_img, conf=conf_threshold, device=device, verbose=False)
@@ -203,15 +210,14 @@ def infer_tiled(
                 all_detections.append(detection)
     
     print(f"Total detections before NMS: {len(all_detections)}")
-    
+
     # Apply global NMS
     print(f"\nApplying global NMS (IoU threshold={iou_threshold})...")
+    if progress_callback:
+        progress_callback(0.88, f"Applying NMS to {len(all_detections)} candidates...")
     final_detections = nms_global(all_detections, iou_threshold)
     print(f"Final detections after NMS: {len(final_detections)}")
 
-    if progress_callback:
-        progress_callback(1.0, f"Done — {len(final_detections)} detections")
-    
     # Save to CSV
     csv_path = output_dir / f"{image_name}_detections.csv"
     df_data = []
@@ -233,6 +239,8 @@ def infer_tiled(
     
     # Create visualization
     print(f"\nCreating visualization...")
+    if progress_callback:
+        progress_callback(0.93, f"Creating overlay ({len(final_detections)} detections)...")
     draw = ImageDraw.Draw(img)
     
     for det in final_detections:
@@ -247,10 +255,12 @@ def infer_tiled(
         draw.text((x1, y1 - 10), text, fill='red')
     
     # Save overlay
+    if progress_callback:
+        progress_callback(0.97, "Saving results...")
     overlay_path = output_dir / f"{image_name}_overlay.jpg"
     img.save(overlay_path, quality=95)
     print(f"Saved overlay to: {overlay_path}")
-    
+
     # Save metadata
     metadata = {
         'image_path': str(image_path),
@@ -270,11 +280,14 @@ def infer_tiled(
         json.dump(metadata, f, indent=2)
     print(f"Saved metadata to: {metadata_path}")
     
+    if progress_callback:
+        progress_callback(1.0, f"Done — {len(final_detections)} detections")
+
     print("\n" + "="*70)
     print(f"Inference complete!")
     print(f"Detected {len(final_detections)} collembola organisms")
     print("="*70)
-    
+
     return final_detections
 
 

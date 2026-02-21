@@ -189,26 +189,30 @@ def measure_organisms_fast(image_path: Path,
     """
     # Load image
     print(f"Loading image: {image_path}")
+    if progress_callback:
+        progress_callback(0.0, "Loading image...")
     Image.MAX_IMAGE_PIXELS = None
     img_pil = Image.open(image_path)
     img_array = np.array(img_pil.convert('RGB'))
     print(f"Image size: {img_pil.width} × {img_pil.height}")
-    
+
     # Load detections
     print(f"\nLoading detections: {detections_csv}")
     df_det = pd.read_csv(detections_csv)
     print(f"Found {len(df_det)} detections")
-    
+
     # Process each detection
     print(f"\nMeasuring organisms (fast method)...")
     measurements = []
-    
+
     total = len(df_det)
+    if progress_callback:
+        progress_callback(0.05, f"Measuring {total} organisms...")
     for idx, row in tqdm(df_det.iterrows(), total=total, desc="Processing"):
         bbox = [row['x1'], row['y1'], row['x2'], row['y2']]
 
         if progress_callback:
-            progress_callback(idx / total, f"Organism {idx + 1}/{total}")
+            progress_callback(0.05 + 0.90 * (idx / total), f"Organism {idx + 1}/{total}")
 
         try:
             meas = measure_organism_fast(img_array, bbox, um_per_pixel)

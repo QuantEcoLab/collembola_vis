@@ -1,9 +1,12 @@
 """Image upload and management endpoints."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from pydantic import BaseModel
 
 from backend.auth import get_current_user
-from backend.services.image import delete_image, get_image_info, list_images, save_upload
+from backend.services.image import delete_image, get_image_info, list_images, register_server_path, save_upload
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(get_current_user)])
 
@@ -19,6 +22,26 @@ async def upload_image(file: UploadFile):
         raise HTTPException(400, "Empty file")
 
     result = save_upload(file.filename, content)
+    return result
+
+
+class ServerPathRequest(BaseModel):
+    path: str
+
+
+@router.post("/from-path")
+async def register_from_path(body: ServerPathRequest):
+    """Register an existing server-side image by absolute path (no upload needed)."""
+    image_path = Path(body.path)
+    if not image_path.exists() or not image_path.is_file():
+        raise HTTPException(400, f"File not found on server: {body.path}")
+    suffix = image_path.suffix.lower()
+    if suffix not in {".jpg", ".jpeg", ".png", ".tif", ".tiff"}:
+        raise HTTPException(400, f"Unsupported file type: {suffix}")
+    try:
+        result = register_server_path(image_path)
+    except Exception as e:
+        raise HTTPException(500, str(e))
     return result
 
 

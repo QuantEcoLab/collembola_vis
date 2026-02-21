@@ -1,4 +1,4 @@
-import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react'
 import type { Job } from '../api/types'
 
 interface Props {
@@ -9,26 +9,53 @@ export default function JobProgress({ job }: Props) {
   if (!job) return null
 
   const pct = Math.round(job.progress * 100)
+  const isActive = job.status === 'running' || job.status === 'pending'
+  // Show indeterminate animation when there's no measurable progress yet
+  const isIndeterminate = isActive && pct === 0
 
   return (
-    <div className="bg-white border rounded-lg p-4 space-y-2">
-      <div className="flex items-center gap-2">
-        {job.status === 'running' && <Loader2 size={18} className="animate-spin text-blue-500" />}
-        {job.status === 'completed' && <CheckCircle2 size={18} className="text-green-600" />}
-        {job.status === 'failed' && <XCircle size={18} className="text-red-600" />}
-        {job.status === 'pending' && <Loader2 size={18} className="text-gray-400" />}
-        <span className="text-sm font-medium capitalize">{job.status}</span>
+    <div className="bg-white border rounded-lg p-4 space-y-3">
+      {/* Status row */}
+      <div className="flex items-center gap-2 min-w-0">
+        {job.status === 'running' && (
+          <Loader2 size={16} className="animate-spin text-blue-500 shrink-0" />
+        )}
+        {job.status === 'completed' && (
+          <CheckCircle2 size={16} className="text-green-600 shrink-0" />
+        )}
+        {job.status === 'failed' && (
+          <XCircle size={16} className="text-red-600 shrink-0" />
+        )}
+        {job.status === 'pending' && (
+          <Clock size={16} className="text-gray-400 shrink-0" />
+        )}
+
+        <span className="text-sm font-medium capitalize text-gray-700">
+          {job.status}
+        </span>
+
         {job.message && (
-          <span className="text-sm text-gray-500 ml-2">{job.message}</span>
+          <span className="text-sm text-gray-500 truncate">{job.message}</span>
+        )}
+
+        {isActive && !isIndeterminate && (
+          <span className="ml-auto text-sm font-mono font-medium text-blue-600 shrink-0">
+            {pct}%
+          </span>
         )}
       </div>
 
-      {(job.status === 'running' || job.status === 'pending') && (
-        <div className="w-full bg-gray-200 rounded-full h-2">
-          <div
-            className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-            style={{ width: `${pct}%` }}
-          />
+      {/* Progress bar */}
+      {isActive && (
+        <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden">
+          {isIndeterminate ? (
+            <div className="h-3 w-full bg-gradient-to-r from-blue-300 via-blue-500 to-blue-300 animate-pulse rounded-full" />
+          ) : (
+            <div
+              className="bg-blue-500 h-3 rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${pct}%` }}
+            />
+          )}
         </div>
       )}
 
