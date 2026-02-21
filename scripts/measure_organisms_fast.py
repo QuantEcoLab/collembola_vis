@@ -175,9 +175,17 @@ def measure_organism_fast(image: np.ndarray,
 def measure_organisms_fast(image_path: Path,
                             detections_csv: Path,
                             output_csv: Path,
-                            um_per_pixel: float):
+                            um_per_pixel: float,
+                            progress_callback=None):
     """
     Fast measurement for all detected organisms.
+
+    Args:
+        image_path: Path to original plate image
+        detections_csv: Path to YOLO detections CSV
+        output_csv: Path to save measurements CSV
+        um_per_pixel: Calibration factor (micrometers per pixel)
+        progress_callback: Optional callable(progress: float, message: str) for progress updates
     """
     # Load image
     print(f"Loading image: {image_path}")
@@ -195,9 +203,13 @@ def measure_organisms_fast(image_path: Path,
     print(f"\nMeasuring organisms (fast method)...")
     measurements = []
     
-    for idx, row in tqdm(df_det.iterrows(), total=len(df_det), desc="Processing"):
+    total = len(df_det)
+    for idx, row in tqdm(df_det.iterrows(), total=total, desc="Processing"):
         bbox = [row['x1'], row['y1'], row['x2'], row['y2']]
-        
+
+        if progress_callback:
+            progress_callback(idx / total, f"Organism {idx + 1}/{total}")
+
         try:
             meas = measure_organism_fast(img_array, bbox, um_per_pixel)
             
@@ -235,7 +247,10 @@ def measure_organisms_fast(image_path: Path,
         'method'
     ]
     df_meas = df_meas[cols_order]
-    
+
+    if progress_callback:
+        progress_callback(1.0, f"Done — {len(df_meas)} organisms measured")
+
     # Save CSV
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     df_meas.to_csv(output_csv, index=False)

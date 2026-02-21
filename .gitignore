@@ -40,3 +40,9 @@ jana_code/slike/
 
 # Original ignore rule (kept): collected jpgs under pattern
 collembolas*/*.jpg
+
+# Web UI
+frontend/node_modules/
+frontend/dist/
+data/uploads/
+data/web_outputs/

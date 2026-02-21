@@ -179,10 +179,11 @@ def measure_organisms(image_path: Path,
                       um_per_pixel: float,
                       sam_checkpoint: str = "checkpoints/sam_vit_b.pth",
                       device: str = "cuda",
-                      save_visualization: bool = True):
+                      save_visualization: bool = True,
+                      progress_callback=None):
     """
     Main function to measure all detected organisms.
-    
+
     Args:
         image_path: Path to original plate image
         detections_csv: Path to YOLO detections CSV
@@ -191,6 +192,7 @@ def measure_organisms(image_path: Path,
         sam_checkpoint: Path to SAM checkpoint
         device: Device to run SAM on
         save_visualization: Whether to save visualization overlay
+        progress_callback: Optional callable(progress: float, message: str) for progress updates
     """
     # Load image
     print(f"Loading image: {image_path}")
@@ -211,9 +213,13 @@ def measure_organisms(image_path: Path,
     print(f"\nMeasuring organisms...")
     measurements = []
     
-    for idx, row in tqdm(df_det.iterrows(), total=len(df_det), desc="Processing"):
+    total = len(df_det)
+    for idx, row in tqdm(df_det.iterrows(), total=total, desc="Processing"):
         bbox = [row['x1'], row['y1'], row['x2'], row['y2']]
-        
+
+        if progress_callback:
+            progress_callback(idx / total, f"Organism {idx + 1}/{total}")
+
         try:
             # Segment organism with SAM
             mask = segment_organism_sam(predictor, img_array, bbox)
@@ -256,7 +262,10 @@ def measure_organisms(image_path: Path,
         'mask_available'
     ]
     df_meas = df_meas[cols_order]
-    
+
+    if progress_callback:
+        progress_callback(1.0, f"Done — {len(df_meas)} organisms measured")
+
     # Save CSV
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     df_meas.to_csv(output_csv, index=False)

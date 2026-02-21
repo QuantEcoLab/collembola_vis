@@ -126,11 +126,12 @@ def infer_tiled(
     conf_threshold=0.25,
     iou_threshold=0.5,
     output_dir=None,
-    device='0'
+    device='0',
+    progress_callback=None
 ):
     """
     Run tiled inference on a large image.
-    
+
     Args:
         image_path: Path to input image
         model_path: Path to YOLO model weights
@@ -140,7 +141,8 @@ def infer_tiled(
         iou_threshold: IoU threshold for NMS
         output_dir: Output directory (default: infer_tiled_output)
         device: GPU device(s) to use
-    
+        progress_callback: Optional callable(progress: float, message: str) for progress updates
+
     Returns:
         detections: List of detection dictionaries
     """
@@ -172,10 +174,14 @@ def infer_tiled(
     print(f"\nRunning detection on tiles...")
     all_detections = []
     
-    for tile_img, x_offset, y_offset, tile_id in tiles:
+    for tile_idx, (tile_img, x_offset, y_offset, tile_id) in enumerate(tiles):
+        # Report progress
+        if progress_callback:
+            progress_callback(tile_idx / len(tiles), f"Tile {tile_idx + 1}/{len(tiles)}")
+
         # Run YOLO on tile
         results = model(tile_img, conf=conf_threshold, device=device, verbose=False)
-        
+
         # Convert to full image coordinates
         for result in results:
             boxes = result.boxes
@@ -202,6 +208,9 @@ def infer_tiled(
     print(f"\nApplying global NMS (IoU threshold={iou_threshold})...")
     final_detections = nms_global(all_detections, iou_threshold)
     print(f"Final detections after NMS: {len(final_detections)}")
+
+    if progress_callback:
+        progress_callback(1.0, f"Done — {len(final_detections)} detections")
     
     # Save to CSV
     csv_path = output_dir / f"{image_name}_detections.csv"
