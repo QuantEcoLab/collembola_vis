@@ -6,7 +6,7 @@ import type {
   MeasurementRequest,
 } from './types'
 
-const BASE = ''  // proxied by Vite in dev
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')  // Use Vite's BASE_URL, remove trailing slash
 
 /** Read the JWT from the Zustand persist store in localStorage. */
 function getToken(): string | null {

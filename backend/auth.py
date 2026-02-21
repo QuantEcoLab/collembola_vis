@@ -14,8 +14,9 @@ _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_DAYS = 7
 
 # ── Hardcoded users (password stored as bcrypt hash) ─────────────────────────
+# Username: user1, Password: user12345
 _USERS: dict[str, bytes] = {
-    "user1": bcrypt.hashpw(b"user12345", bcrypt.gensalt()),
+    "user1": b"$2b$12$YAIbQEfmn5d0IXDdGg7QzOUzrMYknVwyYuXIwrauZMrMn9NApc6Si",
 }
 
 

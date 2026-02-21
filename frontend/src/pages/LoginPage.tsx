@@ -18,7 +18,8 @@ export default function LoginPage() {
       const body = new URLSearchParams()
       body.append('username', username)
       body.append('password', password)
-      const res = await fetch('/api/auth/login', { method: 'POST', body })
+      const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+      const res = await fetch(`${base}/api/auth/login`, { method: 'POST', body })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.detail || 'Login failed')

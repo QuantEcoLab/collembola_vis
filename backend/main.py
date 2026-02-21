@@ -36,6 +36,7 @@ app = FastAPI(
     title="Collembola Detection Pipeline",
     version="1.0.0",
     lifespan=lifespan,
+    root_path="/collembola",
 )
 
 # CORS — allow Vite dev server in development
