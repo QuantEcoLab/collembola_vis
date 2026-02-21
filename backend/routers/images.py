@@ -1,10 +1,11 @@
 """Image upload and management endpoints."""
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 
+from backend.auth import get_current_user
 from backend.services.image import delete_image, get_image_info, list_images, save_upload
 
-router = APIRouter(prefix="/api/images", tags=["images"])
+router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/upload")

@@ -1,10 +1,11 @@
 """Job listing and status endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from backend.auth import get_current_user
 from backend.jobs.manager import job_manager
 
-router = APIRouter(prefix="/api/jobs", tags=["jobs"])
+router = APIRouter(prefix="/api/jobs", tags=["jobs"], dependencies=[Depends(get_current_user)])
 
 
 @router.get("")

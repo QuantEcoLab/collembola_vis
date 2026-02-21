@@ -1,13 +1,14 @@
 """Measurement endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from backend.auth import get_current_user
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobType
 from backend.services.image import get_image_info
 
-router = APIRouter(prefix="/api/measurement", tags=["measurement"])
+router = APIRouter(prefix="/api/measurement", tags=["measurement"], dependencies=[Depends(get_current_user)])
 
 
 class MeasurementRequest(BaseModel):

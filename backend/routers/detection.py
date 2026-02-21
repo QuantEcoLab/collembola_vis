@@ -1,14 +1,15 @@
 """Detection endpoints."""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from backend.auth import get_current_user
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobType
 from backend.services.image import get_image_info
 
-router = APIRouter(prefix="/api/detection", tags=["detection"])
+router = APIRouter(prefix="/api/detection", tags=["detection"], dependencies=[Depends(get_current_user)])
 
 
 class DetectionRequest(BaseModel):

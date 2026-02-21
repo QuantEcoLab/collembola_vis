@@ -1,0 +1,19 @@
+[Unit]
+Description=Collembola Detection Pipeline
+After=network.target
+
+[Service]
+Type=simple
+User=adeb
+WorkingDirectory=/home/adeb/dev/collembola_vis
+ExecStart=/home/adeb/miniforge3/envs/collembola/bin/uvicorn \
+    backend.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 1
+Restart=always
+RestartSec=5
+Environment=PYTHONPATH=/home/adeb/dev/collembola_vis
+
+[Install]
+WantedBy=multi-user.target

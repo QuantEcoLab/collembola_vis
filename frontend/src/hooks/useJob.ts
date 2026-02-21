@@ -15,7 +15,9 @@ export function useJobProgress(jobId: string | null): Job | undefined {
     if (!jobId) return
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/jobs/${jobId}`)
+    const raw = localStorage.getItem('auth')
+    const token = raw ? ((JSON.parse(raw) as { state?: { token?: string } }).state?.token ?? '') : ''
+    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/jobs/${jobId}?token=${encodeURIComponent(token)}`)
     wsRef.current = ws
 
     ws.onmessage = (event) => {

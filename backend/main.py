@@ -5,8 +5,10 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.auth import router as auth_router
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobType
@@ -14,6 +16,8 @@ from backend.routers import calibration, detection, images, jobs, measurement
 from backend.services.detection import run_detection
 from backend.services.measurement import run_measurement
 from backend.websocket.progress import router as ws_router
+
+_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 @asynccontextmanager
@@ -34,7 +38,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow Vite dev server
+# CORS — allow Vite dev server in development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -44,6 +48,7 @@ app.add_middleware(
 )
 
 # API routers
+app.include_router(auth_router)
 app.include_router(images.router)
 app.include_router(calibration.router)
 app.include_router(detection.router)
@@ -66,3 +71,16 @@ app.mount("/files/outputs", StaticFiles(directory=str(outputs_dir)), name="outpu
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+# Serve the React SPA — must be last so API routes take priority
+if _DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="spa_assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        """Serve built frontend; fall back to index.html for SPA routing."""
+        candidate = _DIST / full_path
+        if candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(_DIST / "index.html"))

@@ -2,9 +2,10 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from backend.auth import get_current_user
 from backend.services.calibration import (
     auto_calibrate,
     get_calibration,
@@ -13,7 +14,7 @@ from backend.services.calibration import (
 )
 from backend.services.image import get_image_info
 
-router = APIRouter(prefix="/api/calibration", tags=["calibration"])
+router = APIRouter(prefix="/api/calibration", tags=["calibration"], dependencies=[Depends(get_current_user)])
 
 
 class AutoCalibrateRequest(BaseModel):

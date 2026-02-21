@@ -8,12 +8,35 @@ import type {
 
 const BASE = ''  // proxied by Vite in dev
 
+/** Read the JWT from the Zustand persist store in localStorage. */
+function getToken(): string | null {
+  try {
+    const raw = localStorage.getItem('auth')
+    if (!raw) return null
+    return (JSON.parse(raw) as { state?: { token?: string } }).state?.token ?? null
+  } catch {
+    return null
+  }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+function handle401(): never {
+  localStorage.removeItem('auth')
+  window.location.href = '/login'
+  throw new Error('Unauthorized')
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     ...options,
   })
   if (!res.ok) {
+    if (res.status === 401) handle401()
     const err = await res.json().catch(() => ({ detail: res.statusText }))
     throw new Error(err.detail || res.statusText)
   }
@@ -24,8 +47,15 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const uploadImage = async (file: File): Promise<ImageInfo> => {
   const form = new FormData()
   form.append('file', file)
-  const res = await fetch(`${BASE}/api/images/upload`, { method: 'POST', body: form })
-  if (!res.ok) throw new Error('Upload failed')
+  const res = await fetch(`${BASE}/api/images/upload`, {
+    method: 'POST',
+    body: form,
+    headers: authHeaders(),
+  })
+  if (!res.ok) {
+    if (res.status === 401) handle401()
+    throw new Error('Upload failed')
+  }
   return res.json()
 }
 

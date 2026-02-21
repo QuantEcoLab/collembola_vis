@@ -5,15 +5,23 @@ import json
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend.auth import verify_token
 from backend.jobs.manager import job_manager
 
 router = APIRouter()
 
 
 @router.websocket("/ws/jobs/{job_id}")
-async def job_progress_ws(websocket: WebSocket, job_id: str):
+async def job_progress_ws(websocket: WebSocket, job_id: str, token: str = ""):
     """WebSocket endpoint that streams job progress updates."""
     await websocket.accept()
+
+    try:
+        verify_token(token)
+    except Exception:
+        await websocket.send_json({"error": "Unauthorized"})
+        await websocket.close(code=4001)
+        return
 
     job = job_manager.get(job_id)
     if job is None:

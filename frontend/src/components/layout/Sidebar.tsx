@@ -1,5 +1,6 @@
-import { NavLink } from 'react-router-dom'
-import { Crosshair, Ruler, ScanSearch, Table2, LayoutList } from 'lucide-react'
+import { NavLink, useNavigate } from 'react-router-dom'
+import { Crosshair, Ruler, ScanSearch, Table2, LayoutList, LogOut } from 'lucide-react'
+import { useAuthStore } from '../../store/authStore'
 
 const links = [
   { to: '/', label: 'Calibrate', icon: Ruler },
@@ -10,6 +11,14 @@ const links = [
 ]
 
 export default function Sidebar() {
+  const logout = useAuthStore((s) => s.logout)
+  const navigate = useNavigate()
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <aside className="w-56 shrink-0 bg-gray-900 text-gray-300 flex flex-col">
       <div className="px-4 py-5 border-b border-gray-800">
@@ -34,6 +43,15 @@ export default function Sidebar() {
           </NavLink>
         ))}
       </nav>
+      <div className="border-t border-gray-800 p-3">
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-3 px-4 py-2.5 text-sm w-full rounded hover:bg-gray-800/50 transition-colors"
+        >
+          <LogOut size={18} />
+          Sign out
+        </button>
+      </div>
     </aside>
   )
 }
