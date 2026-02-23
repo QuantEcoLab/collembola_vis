@@ -1,12 +1,13 @@
 """Detection endpoints."""
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.auth import get_current_user
 from backend.config import settings
 from backend.jobs.manager import job_manager
-from backend.jobs.models import JobType
+from backend.jobs.models import JobStatus, JobType
 from backend.services.image import get_image_info
 
 router = APIRouter(prefix="/api/detection", tags=["detection"], dependencies=[Depends(get_current_user)])
@@ -54,3 +55,32 @@ async def get_detection_result(job_id: str):
     if job is None:
         raise HTTPException(404, "Job not found")
     return job.to_dict()
+
+
+@router.get("/boxes/{job_id}")
+async def get_detection_boxes(job_id: str):
+    """Return bounding boxes from a completed detection job as JSON."""
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(400, "Job not completed yet")
+    csv_path = job.result.get("csv_path")
+    if not csv_path:
+        raise HTTPException(404, "No CSV result for this job")
+    try:
+        df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        raise HTTPException(404, "Detections CSV not found on disk")
+    boxes = []
+    for i, row in df.iterrows():
+        boxes.append({
+            "id": f"box-{i}",
+            "x1": float(row["x1"]),
+            "y1": float(row["y1"]),
+            "x2": float(row["x2"]),
+            "y2": float(row["y2"]),
+            "conf": float(row.get("confidence", row.get("conf", 1.0))),
+            "status": "accepted",
+        })
+    return {"boxes": boxes}

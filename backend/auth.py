@@ -1,4 +1,4 @@
-"""Authentication: JWT login for a single hardcoded user."""
+"""Authentication: JWT login with role-based access control."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -14,9 +14,17 @@ _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_DAYS = 7
 
 # ── Hardcoded users (password stored as bcrypt hash) ─────────────────────────
-# Username: user1, Password: user12345
-_USERS: dict[str, bytes] = {
-    "user1": b"$2b$12$YAIbQEfmn5d0IXDdGg7QzOUzrMYknVwyYuXIwrauZMrMn9NApc6Si",
+# user1 / user12345  → role: user
+# admin / admin12345 → role: admin
+_USERS: dict[str, dict] = {
+    "user1": {
+        "hash": b"$2b$12$YAIbQEfmn5d0IXDdGg7QzOUzrMYknVwyYuXIwrauZMrMn9NApc6Si",
+        "role": "user",
+    },
+    "admin": {
+        "hash": b"$2b$12$AWueC8rp4LcYDNbNNJt5E.Hs/s5YKO1UWfc9zAsbiolCySJcXZsfG",
+        "role": "admin",
+    },
 }
 
 
@@ -29,13 +37,17 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def create_access_token(username: str) -> str:
+def create_access_token(username: str, role: str) -> str:
     expire = datetime.now(timezone.utc) + timedelta(days=_TOKEN_EXPIRE_DAYS)
-    return jwt.encode({"sub": username, "exp": expire}, _SECRET_KEY, algorithm=_ALGORITHM)
+    return jwt.encode(
+        {"sub": username, "role": role, "exp": expire},
+        _SECRET_KEY,
+        algorithm=_ALGORITHM,
+    )
 
 
-def verify_token(token: str) -> str:
-    """Decode JWT and return username, or raise 401."""
+def verify_token(token: str) -> dict:
+    """Decode JWT and return {username, role}, or raise 401."""
     credentials_exc = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid or expired token",
@@ -46,13 +58,26 @@ def verify_token(token: str) -> str:
         username: str | None = payload.get("sub")
         if not username or username not in _USERS:
             raise credentials_exc
-        return username
+        role: str = payload.get("role", _USERS[username]["role"])
+        return {"username": username, "role": role}
     except JWTError:
         raise credentials_exc
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme)) -> str:
-    return verify_token(token)
+    """Return the current username (any authenticated user)."""
+    return verify_token(token)["username"]
+
+
+async def require_admin(token: str = Depends(oauth2_scheme)) -> str:
+    """Return username if the current user has the admin role, else raise 403."""
+    info = verify_token(token)
+    if info["role"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required",
+        )
+    return info["username"]
 
 
 # ── Router ────────────────────────────────────────────────────────────────────
@@ -67,16 +92,18 @@ class Token(BaseModel):
 @router.post("/login", response_model=Token)
 async def login(form: OAuth2PasswordRequestForm = Depends()):
     """Exchange username + password for a JWT access token."""
-    hashed = _USERS.get(form.username)
-    if not hashed or not _verify_password(form.password, hashed):
+    user = _USERS.get(form.username)
+    if not user or not _verify_password(form.password, user["hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return Token(access_token=create_access_token(form.username), token_type="bearer")
+    token = create_access_token(form.username, user["role"])
+    return Token(access_token=token, token_type="bearer")
 
 
 @router.get("/me")
-async def me(username: str = Depends(get_current_user)):
-    return {"username": username}
+async def me(token: str = Depends(oauth2_scheme)):
+    info = verify_token(token)
+    return {"username": info["username"], "role": info["role"]}

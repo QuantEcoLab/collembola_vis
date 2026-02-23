@@ -1,9 +1,14 @@
 import type {
+  AnnotatedBox,
+  AnnotationFile,
   CalibrationResult,
+  CommunityEntry,
+  CommunityStats,
   DetectionRequest,
   ImageInfo,
   Job,
   MeasurementRequest,
+  ModelInfo,
 } from './types'
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')  // Use Vite's BASE_URL, remove trailing slash
@@ -141,10 +146,82 @@ export const getMeasurementResult = (jobId: string) =>
 export const listJobs = () => request<Job[]>('/api/jobs')
 export const getJob = (id: string) => request<Job>(`/api/jobs/${id}`)
 
-// Thumbnail URL helper
+// Full image URL (original file as uploaded / symlinked)
+export const imageUrl = (imageId: string, filename: string) =>
+  `${BASE}/files/uploads/${imageId}/${encodeURIComponent(filename)}`
+
+// Thumbnail URL helper (kept for compatibility)
 export const thumbnailUrl = (imageId: string) =>
   `${BASE}/files/uploads/${imageId}/thumbnail.jpg`
 
 // Output file URL helper
 export const outputFileUrl = (jobId: string, filename: string) =>
   `${BASE}/files/outputs/${jobId}/${filename}`
+
+// Detection boxes (raw CSV as JSON)
+export const getDetectionBoxes = (jobId: string) =>
+  request<{ boxes: AnnotatedBox[] }>(`/api/detection/boxes/${jobId}`)
+
+// Annotations
+export const getAnnotations = (imageId: string) =>
+  request<AnnotationFile>(`/api/annotations/${imageId}`)
+
+export const saveAnnotations = (imageId: string, data: AnnotationFile) =>
+  request<{ ok: boolean }>(`/api/annotations/${imageId}`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const annotationExportUrl = (imageId: string, fmt: 'json' | 'csv') =>
+  `${BASE}/api/annotations/${imageId}/export?format=${fmt}`
+
+// Models
+export const listModels = () => request<ModelInfo[]>('/api/models')
+
+// Fine-tune
+export interface FinetuneRequest {
+  image_id: string
+  annotation_file: string
+  base_model?: string
+  epochs?: number
+  device?: string
+  tile_size?: number
+  overlap?: number
+}
+
+export const runFinetune = (req: FinetuneRequest) =>
+  request<{ job_id: string; status: string }>('/api/finetune/run', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+// Community
+export interface CommunitySubmitRequest {
+  image_name: string
+  image_width?: number | null
+  image_height?: number | null
+  um_per_pixel?: number | null
+  conf_threshold?: number | null
+  boxes: AnnotatedBox[]
+}
+
+export const submitToCommunity = (req: CommunitySubmitRequest) =>
+  request<{ id: string; num_detections: number }>('/api/community/submit', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
+export const listCommunity = (limit = 20, offset = 0, search = '') => {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (search) params.set('search', search)
+  return request<CommunityEntry[]>(`/api/community/list?${params}`)
+}
+
+export const getCommunityEntry = (id: string) =>
+  request<CommunityEntry & { boxes: Record<string, any>[] }>(`/api/community/${id}`)
+
+export const getCommunityStats = () =>
+  request<CommunityStats>('/api/community/stats')
+
+export const communityExportUrl = (id: string, format: 'json' | 'csv') =>
+  `${BASE}/api/community/${id}/export?format=${format}`

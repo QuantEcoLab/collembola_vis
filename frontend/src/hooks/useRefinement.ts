@@ -1,0 +1,187 @@
+import { useState, useEffect, useCallback } from 'react'
+import type { AnnotatedBox, AnnotationFile } from '../api/types'
+import {
+  getDetectionBoxes,
+  getAnnotations,
+  saveAnnotations as saveAnnotationsApi,
+} from '../api/client'
+
+interface DrawingBox {
+  x1: number; y1: number; x2: number; y2: number
+}
+
+interface UseRefinementResult {
+  boxes: AnnotatedBox[]
+  isLoading: boolean
+  error: string | null
+  toggleBox: (id: string) => void
+  removeBox: (id: string) => void
+  loadBoxes: (boxes: AnnotatedBox[]) => void
+  selectedId: string | null
+  selectBox: (id: string | null) => void
+  drawingBox: DrawingBox | null
+  startDraw: (x: number, y: number) => void
+  updateDraw: (x: number, y: number) => void
+  commitDraw: (x: number, y: number) => void
+  saveAnnotations: (imageId: string, imageFilename: string, detectionJobId: string) => Promise<void>
+  isSaving: boolean
+  annotationsSaved: boolean
+  acceptedCount: number
+  rejectedCount: number
+  addedCount: number
+}
+
+export function useRefinement(
+  imageId: string | null,
+  detectionJobId: string | null,
+): UseRefinementResult {
+  const [boxes, setBoxes] = useState<AnnotatedBox[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [drawingBox, setDrawingBox] = useState<DrawingBox | null>(null)
+  const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [annotationsSaved, setAnnotationsSaved] = useState(false)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // Load boxes whenever detection job changes
+  useEffect(() => {
+    if (!detectionJobId || !imageId) {
+      setBoxes([])
+      setAnnotationsSaved(false)
+      return
+    }
+
+    let cancelled = false
+    setIsLoading(true)
+    setError(null)
+    setAnnotationsSaved(false)
+
+    async function load() {
+      try {
+        // Try to restore previously saved annotations first
+        let restored = false
+        try {
+          const ann = await getAnnotations(imageId!)
+          if (ann.source_job_id === detectionJobId && ann.boxes.length > 0) {
+            if (!cancelled) {
+              setBoxes(ann.boxes)
+              setAnnotationsSaved(true)
+              restored = true
+            }
+          }
+        } catch {
+          // No saved annotations — fall through to loading from detection
+        }
+
+        if (!restored && !cancelled) {
+          const result = await getDetectionBoxes(detectionJobId!)
+          if (!cancelled) setBoxes(result.boxes)
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e.message)
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [detectionJobId, imageId])
+
+  const toggleBox = useCallback((id: string) => {
+    setBoxes((prev) =>
+      prev.map((b) =>
+        b.id === id
+          ? { ...b, status: b.status === 'rejected' ? 'accepted' : 'rejected' }
+          : b,
+      ),
+    )
+  }, [])
+
+  const removeBox = useCallback((id: string) => {
+    setBoxes((prev) => prev.filter((b) => b.id !== id))
+    setSelectedId((prev) => (prev === id ? null : prev))
+    setAnnotationsSaved(false)
+  }, [])
+
+  const selectBox = useCallback((id: string | null) => {
+    setSelectedId(id)
+  }, [])
+
+  const loadBoxes = useCallback((incoming: AnnotatedBox[]) => {
+    setBoxes(incoming)
+    setAnnotationsSaved(false)
+  }, [])
+
+  const startDraw = useCallback((x: number, y: number) => {
+    setDrawStart({ x, y })
+    setDrawingBox({ x1: x, y1: y, x2: x, y2: y })
+  }, [])
+
+  const updateDraw = useCallback((x: number, y: number) => {
+    setDrawingBox((prev) => prev ? { ...prev, x2: x, y2: y } : null)
+  }, [])
+
+  const commitDraw = useCallback((x: number, y: number) => {
+    setDrawingBox(null)
+    setDrawStart(null)
+    if (!drawStart) return
+    const x1 = Math.min(drawStart.x, x)
+    const y1 = Math.min(drawStart.y, y)
+    const x2 = Math.max(drawStart.x, x)
+    const y2 = Math.max(drawStart.y, y)
+    // Ignore tiny accidental drags
+    if (x2 - x1 < 5 || y2 - y1 < 5) return
+    const newBox: AnnotatedBox = {
+      id: `added-${Date.now()}`,
+      x1, y1, x2, y2,
+      conf: 1.0,
+      status: 'added',
+    }
+    setBoxes((prev) => [...prev, newBox])
+    setAnnotationsSaved(false)
+  }, [drawStart])
+
+  const saveAnnotations = useCallback(async (
+    imageId: string,
+    imageFilename: string,
+    detectionJobId: string,
+  ) => {
+    setIsSaving(true)
+    try {
+      const payload: AnnotationFile = {
+        image_id: imageId,
+        image_filename: imageFilename,
+        source_job_id: detectionJobId,
+        created_at: new Date().toISOString(),
+        boxes,
+      }
+      await saveAnnotationsApi(imageId, payload)
+      setAnnotationsSaved(true)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [boxes])
+
+  return {
+    boxes,
+    isLoading,
+    error,
+    toggleBox,
+    removeBox,
+    loadBoxes,
+    selectedId,
+    selectBox,
+    drawingBox,
+    startDraw,
+    updateDraw,
+    commitDraw,
+    saveAnnotations,
+    isSaving,
+    annotationsSaved,
+    acceptedCount: boxes.filter((b) => b.status === 'accepted').length,
+    rejectedCount: boxes.filter((b) => b.status === 'rejected').length,
+    addedCount: boxes.filter((b) => b.status === 'added').length,
+  }
+}

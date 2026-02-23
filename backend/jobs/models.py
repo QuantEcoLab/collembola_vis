@@ -18,6 +18,7 @@ class JobType(str, Enum):
     MEASUREMENT = "measurement"
     CALIBRATION = "calibration"
     BATCH = "batch"
+    FINETUNE = "finetune"
 
 
 @dataclass

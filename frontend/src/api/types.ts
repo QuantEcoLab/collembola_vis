@@ -25,7 +25,7 @@ export interface CalibrationResult {
 
 export interface Job {
   id: string
-  type: 'detection' | 'measurement' | 'calibration' | 'batch'
+  type: 'detection' | 'measurement' | 'calibration' | 'batch' | 'finetune'
   status: 'pending' | 'running' | 'completed' | 'failed'
   progress: number
   message: string
@@ -34,6 +34,50 @@ export interface Job {
   created_at: string
   started_at: string | null
   completed_at: string | null
+}
+
+export interface AnnotatedBox {
+  id: string
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  conf: number
+  status: 'accepted' | 'rejected' | 'added'
+}
+
+export interface AnnotationFile {
+  image_id: string
+  image_filename: string
+  source_job_id: string
+  created_at: string
+  boxes: AnnotatedBox[]
+}
+
+export interface CommunityEntry {
+  id: string
+  username: string
+  submitted_at: string
+  image_name: string
+  image_width: number | null
+  image_height: number | null
+  num_detections: number
+  um_per_pixel: number | null
+  conf_threshold: number | null
+}
+
+export interface CommunityStats {
+  total_submissions: number
+  total_detections: number
+  total_users: number
+  total_images: number
+}
+
+export interface ModelInfo {
+  name: string
+  path: string
+  size_mb: number
+  mtime: string
 }
 
 export interface DetectionRequest {
@@ -52,4 +96,5 @@ export interface MeasurementRequest {
   um_per_pixel: number
   method?: 'fast' | 'sam'
   device?: string
+  use_annotations?: boolean
 }

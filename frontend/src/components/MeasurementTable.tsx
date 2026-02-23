@@ -6,7 +6,7 @@ import {
   createColumnHelper,
   type SortingState,
 } from '@tanstack/react-table'
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { ArrowUpDown } from 'lucide-react'
 
 interface MeasurementRow {
@@ -15,10 +15,12 @@ interface MeasurementRow {
 
 interface Props {
   data: MeasurementRow[]
+  selectedIndex?: number | null
 }
 
-export default function MeasurementTable({ data }: Props) {
+export default function MeasurementTable({ data, selectedIndex }: Props) {
   const [sorting, setSorting] = useState<SortingState>([])
+  const tbodyRef = useRef<HTMLTableSectionElement>(null)
 
   const columns = useMemo(() => {
     if (!data.length) return []
@@ -43,6 +45,18 @@ export default function MeasurementTable({ data }: Props) {
     getSortedRowModel: getSortedRowModel(),
   })
 
+  // Scroll selected row into view whenever selectedIndex changes
+  useEffect(() => {
+    if (selectedIndex == null || !tbodyRef.current) return
+    const rows = tbodyRef.current.querySelectorAll('tr')
+    // Find the rendered row whose original data index matches selectedIndex
+    const renderedRows = table.getRowModel().rows
+    const renderedIdx = renderedRows.findIndex((r) => r.index === selectedIndex)
+    if (renderedIdx >= 0 && rows[renderedIdx]) {
+      rows[renderedIdx].scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [selectedIndex, table])
+
   if (!data.length) return <p className="text-sm text-gray-500">No data</p>
 
   return (
@@ -66,16 +80,26 @@ export default function MeasurementTable({ data }: Props) {
             </tr>
           ))}
         </thead>
-        <tbody className="divide-y">
-          {table.getRowModel().rows.map((row) => (
-            <tr key={row.id} className="hover:bg-gray-50">
-              {row.getVisibleCells().map((cell) => (
-                <td key={cell.id} className="px-3 py-1.5 whitespace-nowrap">
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
-            </tr>
-          ))}
+        <tbody ref={tbodyRef} className="divide-y">
+          {table.getRowModel().rows.map((row) => {
+            const isSelected = row.index === selectedIndex
+            return (
+              <tr key={row.id} className={isSelected ? '' : 'hover:bg-gray-50'}>
+                {row.getVisibleCells().map((cell, ci) => (
+                  <td
+                    key={cell.id}
+                    className={`px-3 py-1.5 whitespace-nowrap ${
+                      isSelected
+                        ? `bg-amber-100 text-amber-900 font-medium${ci === 0 ? ' border-l-2 border-amber-400' : ''}`
+                        : ''
+                    }`}
+                  >
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>

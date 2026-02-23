@@ -25,8 +25,14 @@ export default function LoginPage() {
         throw new Error(data.detail || 'Login failed')
       }
       const data = await res.json()
-      login(data.access_token)
-      navigate('/', { replace: true })
+      const token = data.access_token
+      // Fetch role from /me using the new token
+      const meRes = await fetch(`${base}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const me = meRes.ok ? await meRes.json() : { role: 'user' }
+      login(token, me.role ?? 'user')
+      navigate('/community', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {

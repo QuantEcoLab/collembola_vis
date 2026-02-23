@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     uploads_dir: Path = Path("data/uploads")
     outputs_dir: Path = Path("data/web_outputs")
     calibration_dir: Path = Path("data/calibration")
+    annotations_dir: Path = Path("data/annotations")
+    models_dir: Path = Path("models")
 
     # Model defaults
     default_model: Path = Path("models/yolo11n_tiled_best.pt")
@@ -33,6 +35,8 @@ class Settings(BaseSettings):
         self.uploads_dir.mkdir(parents=True, exist_ok=True)
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
         self.calibration_dir.mkdir(parents=True, exist_ok=True)
+        self.annotations_dir.mkdir(parents=True, exist_ok=True)
+        self.models_dir.mkdir(parents=True, exist_ok=True)
 
 
 settings = Settings()
