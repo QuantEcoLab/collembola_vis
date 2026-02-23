@@ -197,6 +197,7 @@ export const runFinetune = (req: FinetuneRequest) =>
 
 // Community
 export interface CommunitySubmitRequest {
+  image_id: string
   image_name: string
   image_width?: number | null
   image_height?: number | null

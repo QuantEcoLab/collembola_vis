@@ -28,6 +28,7 @@ def init_db() -> None:
                 id TEXT PRIMARY KEY,
                 username TEXT NOT NULL,
                 submitted_at TEXT NOT NULL,
+                image_id TEXT,
                 image_name TEXT NOT NULL,
                 image_width INTEGER,
                 image_height INTEGER,
@@ -37,13 +38,19 @@ def init_db() -> None:
                 boxes TEXT NOT NULL
             )
         """)
+        # Migration: add image_id column to existing tables that don't have it
+        try:
+            conn.execute("ALTER TABLE community_detections ADD COLUMN image_id TEXT")
+        except Exception:
+            pass  # Column already exists
         conn.commit()
 
 
-def insert(
+def upsert(
     *,
     username: str,
     submitted_at: str,
+    image_id: str,
     image_name: str,
     image_width: int | None,
     image_height: int | None,
@@ -52,29 +59,38 @@ def insert(
     conf_threshold: float | None,
     boxes: list[dict[str, Any]],
 ) -> str:
-    """Insert a new submission; returns the generated id."""
-    entry_id = str(uuid.uuid4())
+    """Insert or update a submission keyed on (username, image_id). Returns the entry id."""
+    boxes_json = json.dumps(boxes)
     with _lock, _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO community_detections
-              (id, username, submitted_at, image_name, image_width, image_height,
-               num_detections, um_per_pixel, conf_threshold, boxes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                entry_id,
-                username,
-                submitted_at,
-                image_name,
-                image_width,
-                image_height,
-                num_detections,
-                um_per_pixel,
-                conf_threshold,
-                json.dumps(boxes),
-            ),
-        )
+        existing = conn.execute(
+            "SELECT id FROM community_detections WHERE username = ? AND image_id = ?",
+            (username, image_id),
+        ).fetchone()
+        if existing:
+            entry_id = existing["id"]
+            conn.execute(
+                """
+                UPDATE community_detections
+                SET submitted_at=?, image_name=?, image_width=?, image_height=?,
+                    num_detections=?, um_per_pixel=?, conf_threshold=?, boxes=?
+                WHERE id=?
+                """,
+                (submitted_at, image_name, image_width, image_height,
+                 num_detections, um_per_pixel, conf_threshold, boxes_json, entry_id),
+            )
+        else:
+            entry_id = str(uuid.uuid4())
+            conn.execute(
+                """
+                INSERT INTO community_detections
+                  (id, username, submitted_at, image_id, image_name, image_width, image_height,
+                   num_detections, um_per_pixel, conf_threshold, boxes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (entry_id, username, submitted_at, image_id, image_name,
+                 image_width, image_height, num_detections, um_per_pixel,
+                 conf_threshold, boxes_json),
+            )
         conn.commit()
     return entry_id
 

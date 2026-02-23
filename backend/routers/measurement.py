@@ -37,13 +37,17 @@ def _annotations_to_csv(image_id: str) -> Path:
 
     out_path = settings.annotations_dir / f"{image_id}_for_measurement.csv"
     with open(out_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["x1", "y1", "x2", "y2", "conf"])
+        writer = csv.DictWriter(f, fieldnames=["x1", "y1", "x2", "y2", "width", "height", "confidence", "class"])
         writer.writeheader()
         for b in boxes:
+            x1, y1, x2, y2 = b["x1"], b["y1"], b["x2"], b["y2"]
             writer.writerow({
-                "x1": b["x1"], "y1": b["y1"],
-                "x2": b["x2"], "y2": b["y2"],
-                "conf": b.get("conf", 1.0),
+                "x1": x1, "y1": y1,
+                "x2": x2, "y2": y2,
+                "width": x2 - x1,
+                "height": y2 - y1,
+                "confidence": b.get("conf", 1.0),
+                "class": 0,
             })
     return out_path
 

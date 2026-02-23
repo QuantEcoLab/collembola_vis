@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useMemo } from 'react'
 import type { AnnotatedBox } from '../api/types'
 
 interface DrawingBox {
@@ -72,7 +72,30 @@ export default function BboxOverlay({
     onDrawEnd(x, y)
   }
 
-  const sw = Math.max(4, Math.round(imageWidth / 500))
+  // Flag non-rejected boxes whose IoU with any other non-rejected box is >= 0.5
+  const overlappingIds = useMemo(() => {
+    const active = boxes.filter((b) => b.status !== 'rejected')
+    const ids = new Set<string>()
+    for (let i = 0; i < active.length; i++) {
+      for (let j = i + 1; j < active.length; j++) {
+        const a = active[i], b = active[j]
+        const ix = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1))
+        const iy = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1))
+        const inter = ix * iy
+        if (inter === 0) continue
+        const areaA = (a.x2 - a.x1) * (a.y2 - a.y1)
+        const areaB = (b.x2 - b.x1) * (b.y2 - b.y1)
+        const overlapRatio = inter / Math.min(areaA, areaB)
+        if (overlapRatio >= 0.5) {
+          ids.add(a.id)
+          ids.add(b.id)
+        }
+      }
+    }
+    return ids
+  }, [boxes])
+
+  const sw = Math.max(2, Math.round(imageWidth / 1000))
 
   return (
     <svg
@@ -93,9 +116,15 @@ export default function BboxOverlay({
       {boxes.map((box) => {
         const isSelected = box.id === selectedId
         const isRejected = box.status === 'rejected'
-        const stroke = isSelected ? '#f59e0b' : statusStroke[box.status]
-        const fill = isSelected ? 'rgba(245,158,11,0.15)' : statusFill[box.status]
-        const strokeWidth = isSelected ? sw * 2 : sw
+        const isOverlapping = !isSelected && !isRejected && overlappingIds.has(box.id)
+        const stroke = isSelected ? '#f59e0b' : isOverlapping ? '#f97316' : statusStroke[box.status]
+        const fill = isSelected
+          ? 'rgba(245,158,11,0.10)'
+          : isOverlapping
+          ? 'rgba(249,115,22,0.10)'
+          : statusFill[box.status]
+        const strokeWidth = isSelected ? sw * 1.5 : isRejected ? sw * 1.2 : sw
+        const strokeOpacity = isSelected ? 0.85 : isRejected ? 0.70 : 0.35
 
         return (
           <g key={box.id}>
@@ -107,7 +136,7 @@ export default function BboxOverlay({
               height={box.y2 - box.y1}
               stroke={stroke}
               strokeWidth={strokeWidth}
-              strokeOpacity={isSelected ? 0.9 : 0.55}
+              strokeOpacity={strokeOpacity}
               strokeDasharray={box.status === 'added' && !isSelected ? `${sw * 4} ${sw * 2}` : undefined}
               fill={fill}
               style={{
@@ -126,8 +155,8 @@ export default function BboxOverlay({
                 x2={box.x2}
                 y2={box.y2}
                 stroke="#ef4444"
-                strokeWidth={sw}
-                opacity={0.5}
+                strokeWidth={sw * 1.2}
+                opacity={0.55}
                 pointerEvents="none"
               />
             )}
@@ -145,8 +174,9 @@ export default function BboxOverlay({
           height={Math.abs(drawingBox.y2 - drawingBox.y1)}
           stroke="#94a3b8"
           strokeWidth={sw}
+          strokeOpacity={0.5}
           strokeDasharray={`${sw * 4} ${sw * 2}`}
-          fill="rgba(148,163,184,0.10)"
+          fill="rgba(148,163,184,0.08)"
           pointerEvents="none"
         />
       )}

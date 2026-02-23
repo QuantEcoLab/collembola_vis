@@ -32,7 +32,7 @@ export default function LoginPage() {
       })
       const me = meRes.ok ? await meRes.json() : { role: 'user' }
       login(token, me.role ?? 'user')
-      navigate('/community', { replace: true })
+      navigate('/collaborate', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {

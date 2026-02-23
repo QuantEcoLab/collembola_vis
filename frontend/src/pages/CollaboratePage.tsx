@@ -8,7 +8,7 @@ import type { CommunityEntry, CommunityStats, AnnotatedBox } from '../api/types'
 
 const PAGE_SIZE = 20
 
-export default function CommunityPage() {
+export default function CollaboratePage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
   const setPending = useCommunityLoadStore((s) => s.setPending)
@@ -96,10 +96,10 @@ export default function CommunityPage() {
               Workspace
             </Link>
             <Link
-              to="/community"
+              to="/collaborate"
               className="text-sm px-3 py-1 rounded-md bg-gray-100 text-gray-900 font-medium transition-colors"
             >
-              Community
+              Collaborate
             </Link>
           </nav>
         </div>
@@ -119,7 +119,7 @@ export default function CommunityPage() {
           {/* Page title */}
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-gray-900">Community Database</h1>
+              <h1 className="text-xl font-semibold text-gray-900">Collaborate</h1>
               <p className="text-sm text-gray-500 mt-0.5">
                 Curated detection results submitted by all users
               </p>

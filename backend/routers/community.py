@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/community", tags=["community"])
 
 
 class SubmitRequest(BaseModel):
+    image_id: str
     image_name: str
     image_width: int | None = None
     image_height: int | None = None
@@ -26,9 +27,10 @@ class SubmitRequest(BaseModel):
 
 @router.post("/submit")
 async def submit(req: SubmitRequest, username: str = Depends(get_current_user)):
-    entry_id = db.insert(
+    entry_id = db.upsert(
         username=username,
         submitted_at=datetime.now(timezone.utc).isoformat(),
+        image_id=req.image_id,
         image_name=req.image_name,
         image_width=req.image_width,
         image_height=req.image_height,

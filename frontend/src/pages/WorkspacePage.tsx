@@ -68,6 +68,7 @@ export default function WorkspacePage() {
   // ── Refinement ─────────────────────────────────────────────────────
   const [refineMode, setRefineMode] = useState(false)
   const [drawMode, setDrawMode] = useState(false)
+  const [showAnnotations, setShowAnnotations] = useState(true)
   const [refineSaveError, setRefineSaveError] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | undefined>()
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'submitting' | 'ok' | 'error'>('idle')
@@ -109,7 +110,9 @@ export default function WorkspacePage() {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
-        refinement.toggleBox(refinement.selectedId)
+        const sel = refinement.boxes.find((b) => b.id === refinement.selectedId)
+        if (sel?.status === 'added') refinement.removeBox(refinement.selectedId)
+        else refinement.toggleBox(refinement.selectedId)
       }
     }
     window.addEventListener('keydown', handler)
@@ -274,6 +277,7 @@ export default function WorkspacePage() {
     setSubmitError(null)
     try {
       await submitToCommunity({
+        image_id: image.image_id,
         image_name: image.filename,
         image_width: image.width,
         image_height: image.height,
@@ -304,10 +308,10 @@ export default function WorkspacePage() {
               Workspace
             </Link>
             <Link
-              to="/community"
+              to="/collaborate"
               className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
             >
-              Community
+              Collaborate
             </Link>
           </nav>
           {image && (
@@ -628,67 +632,6 @@ export default function WorkspacePage() {
                       </p>
                     )}
 
-                    {/* Mode toggle */}
-                    <div className="flex gap-1.5">
-                      {(['review', 'draw'] as const).map((m) => (
-                        <button
-                          key={m}
-                          onClick={() => {
-                            setDrawMode(m === 'draw')
-                            refinement.selectBox(null)
-                          }}
-                          className={`flex-1 py-1.5 rounded-lg text-xs border transition-colors ${
-                            (m === 'draw') === drawMode
-                              ? 'bg-amber-50 border-amber-300 text-amber-700 font-medium'
-                              : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
-                          }`}
-                        >
-                          {m === 'review' ? 'Select' : 'Draw'}
-                        </button>
-                      ))}
-                    </div>
-                    {drawMode && (
-                      <p className="text-xs text-amber-700 bg-amber-50 rounded p-2">
-                        Drag on the image to draw a new box. Pan is disabled.
-                      </p>
-                    )}
-                    {!drawMode && !refinement.selectedId && (
-                      <p className="text-xs text-gray-500">
-                        Click a box to select it, then use the badge to mark it invalid or restore it.
-                      </p>
-                    )}
-                    {!drawMode && refinement.selectedId && (() => {
-                      const sel = refinement.boxes.find((b) => b.id === refinement.selectedId)
-                      const isRejected = sel?.status === 'rejected'
-                      return (
-                        <div className={`flex items-center gap-2 rounded-lg px-2.5 py-2 border ${
-                          isRejected
-                            ? 'bg-red-50 border-red-200'
-                            : 'bg-amber-50 border-amber-200'
-                        }`}>
-                          <span className={`text-xs flex-1 ${isRejected ? 'text-red-700' : 'text-amber-700'}`}>
-                            {isRejected ? '✗ Marked invalid' : '1 box selected'}
-                          </span>
-                          <button
-                            onClick={() => refinement.toggleBox(refinement.selectedId!)}
-                            className={`text-xs font-medium ${
-                              isRejected
-                                ? 'text-green-600 hover:text-green-800'
-                                : 'text-red-600 hover:text-red-800'
-                            }`}
-                          >
-                            {isRejected ? 'Restore' : 'Mark invalid'}
-                          </button>
-                          <button
-                            onClick={() => refinement.selectBox(null)}
-                            className="text-xs text-gray-400 hover:text-gray-600"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      )
-                    })()}
-
                     {/* Save */}
                     <button
                       onClick={handleSaveAnnotations}
@@ -750,9 +693,9 @@ export default function WorkspacePage() {
                   <Divider />
                   <section className="space-y-2">
                     <div className="flex items-center justify-between">
-                      <Label>Community</Label>
+                      <Label>Collaborate</Label>
                       <Link
-                        to="/community"
+                        to="/collaborate"
                         className="text-xs text-blue-500 hover:underline"
                       >
                         Browse →
@@ -774,10 +717,10 @@ export default function WorkspacePage() {
                     )}
                     {submitStatus === 'ok' && (
                       <Link
-                        to="/community"
+                        to="/collaborate"
                         className="block text-center text-xs text-teal-700 hover:underline"
                       >
-                        View in Community →
+                        View in Collaborate →
                       </Link>
                     )}
                   </section>
@@ -877,13 +820,89 @@ export default function WorkspacePage() {
 
           {/* ── Main area: image viewer + measurement table ── */}
           <div className="flex-1 flex flex-col overflow-hidden">
-            <div className={csvData ? 'h-[58%] shrink-0' : 'flex-1'}>
+            <div className={`relative ${csvData ? 'h-[58%] shrink-0' : 'flex-1'}`}>
+              {/* Floating annotation toolbar */}
+              {refineMode && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-0.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5">
+                  {/* Mode: Select / Draw */}
+                  {(['review', 'draw'] as const).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => {
+                        setDrawMode(m === 'draw')
+                        refinement.selectBox(null)
+                        if (m === 'draw') setShowAnnotations(true)
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                        (m === 'draw') === drawMode
+                          ? 'bg-amber-500 text-white'
+                          : 'text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {m === 'review' ? 'Select' : 'Draw'}
+                    </button>
+                  ))}
+
+                  <div className="border-t border-gray-200 my-0.5" />
+
+                  {/* Show / Hide annotations */}
+                  <button
+                    onClick={() => setShowAnnotations((v) => !v)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      showAnnotations
+                        ? 'text-gray-600 hover:bg-gray-100'
+                        : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                    }`}
+                    title={showAnnotations ? 'Hide annotations' : 'Show annotations'}
+                  >
+                    {showAnnotations ? 'Hide' : 'Show'}
+                  </button>
+
+                  {/* Selected box actions */}
+                  {!drawMode && refinement.selectedId && (() => {
+                    const sel = refinement.boxes.find((b) => b.id === refinement.selectedId)
+                    const isAdded = sel?.status === 'added'
+                    const isRejected = sel?.status === 'rejected'
+                    return (
+                      <>
+                        <div className="border-t border-gray-200 my-0.5" />
+                        {isAdded ? (
+                          <button
+                            onClick={() => refinement.removeBox(refinement.selectedId!)}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            Delete
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => refinement.toggleBox(refinement.selectedId!)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                              isRejected
+                                ? 'text-green-600 hover:bg-green-50'
+                                : 'text-red-600 hover:bg-red-50'
+                            }`}
+                          >
+                            {isRejected ? 'Restore' : 'Invalid'}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => refinement.selectBox(null)}
+                          className="px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:bg-gray-100 transition-colors"
+                        >
+                          Deselect
+                        </button>
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
+
               <ImageViewer
                 src={viewerSrc}
                 alt={image.filename}
                 className="h-full"
                 onImageClick={calMode ? handleImageClick : undefined}
-                transformOverlay={refineMode ? (
+                transformOverlay={refineMode && showAnnotations ? (
                   <BboxOverlay
                     boxes={refinement.boxes}
                     imageWidth={image.width}
