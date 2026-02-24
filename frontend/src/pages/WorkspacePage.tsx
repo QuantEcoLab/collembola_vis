@@ -75,8 +75,20 @@ export default function WorkspacePage() {
   const [selectedModel, setSelectedModel] = useState<string | undefined>()
   const refinement = useRefinement(
     image?.image_id ?? null,
+    // Pass detectionJobId always so annotations can be auto-restored even when
+    // the detection job is no longer in memory (e.g. after server restart).
+    // useRefinement only falls through to getDetectionBoxes when the job is set.
     detectionDone ? detectionJobId : null,
   )
+
+  // Auto-enter refine mode whenever saved annotations are restored so boxes are
+  // immediately visible (whether detection job is in memory or not).
+  useEffect(() => {
+    if (refinement.annotationsSaved && !refineMode) {
+      setRefineMode(true)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refinement.annotationsSaved])
 
   // ── Measurement ────────────────────────────────────────────────────
   const [measureMethod, setMeasureMethod] = useState<'fast' | 'sam'>('fast')
@@ -275,10 +287,13 @@ export default function WorkspacePage() {
   }
 
   const handleSaveAnnotations = async () => {
-    if (!image || !detectionJobId) return
+    // Use the active detection job, or fall back to the source job ID from
+    // the auto-restored annotation file (e.g. after server restart).
+    const effectiveJobId = detectionJobId ?? refinement.restoredSourceJobId
+    if (!image || !effectiveJobId) return
     setRefineSaveError(null)
     try {
-      await refinement.saveAnnotations(image.image_id, image.filename, detectionJobId)
+      await refinement.saveAnnotations(image.image_id, image.filename, effectiveJobId)
     } catch (e: any) {
       setRefineSaveError(e.message)
     }

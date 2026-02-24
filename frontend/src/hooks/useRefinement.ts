@@ -26,6 +26,8 @@ interface UseRefinementResult {
   saveAnnotations: (imageId: string, imageFilename: string, detectionJobId: string) => Promise<void>
   isSaving: boolean
   annotationsSaved: boolean
+  /** source_job_id from the annotation file that was auto-restored (null if not from file) */
+  restoredSourceJobId: string | null
   acceptedCount: number
   rejectedCount: number
   addedCount: number
@@ -42,13 +44,17 @@ export function useRefinement(
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [annotationsSaved, setAnnotationsSaved] = useState(false)
+  const [restoredSourceJobId, setRestoredSourceJobId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
-  // Load boxes whenever detection job changes
+  // Load boxes whenever imageId or detectionJobId changes.
+  // When detectionJobId is null (job not in memory / server restart) we still
+  // try to restore saved annotations so previously-annotated images load correctly.
   useEffect(() => {
-    if (!detectionJobId || !imageId) {
+    if (!imageId) {
       setBoxes([])
       setAnnotationsSaved(false)
+      setRestoredSourceJobId(null)
       return
     }
 
@@ -56,25 +62,29 @@ export function useRefinement(
     setIsLoading(true)
     setError(null)
     setAnnotationsSaved(false)
+    setRestoredSourceJobId(null)
 
     async function load() {
       try {
-        // Try to restore previously saved annotations first
+        // Always try saved annotations first.
+        // Restore if: no detection job (job lost from memory) OR source_job_id matches.
         let restored = false
         try {
           const ann = await getAnnotations(imageId!)
-          if (ann.source_job_id === detectionJobId && ann.boxes.length > 0) {
-            if (!cancelled) {
+          if (ann.boxes.length > 0) {
+            const shouldRestore = !detectionJobId || ann.source_job_id === detectionJobId
+            if (shouldRestore && !cancelled) {
               setBoxes(ann.boxes)
               setAnnotationsSaved(true)
+              setRestoredSourceJobId(ann.source_job_id)
               restored = true
             }
           }
         } catch {
-          // No saved annotations — fall through to loading from detection
+          // No saved annotations — fall through
         }
 
-        if (!restored && !cancelled) {
+        if (!restored && detectionJobId && !cancelled) {
           const result = await getDetectionBoxes(detectionJobId!)
           if (!cancelled) setBoxes(result.boxes)
         }
@@ -180,6 +190,7 @@ export function useRefinement(
     saveAnnotations,
     isSaving,
     annotationsSaved,
+    restoredSourceJobId,
     acceptedCount: boxes.filter((b) => b.status === 'accepted').length,
     rejectedCount: boxes.filter((b) => b.status === 'rejected').length,
     addedCount: boxes.filter((b) => b.status === 'added').length,
