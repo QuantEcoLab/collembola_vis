@@ -48,6 +48,29 @@ class JobManager:
     def list_jobs(self) -> list[Job]:
         return list(self._jobs.values())
 
+    def register_completed(self, job_type: JobType, params: dict, result: dict) -> Job:
+        """Register a pre-completed job without going through the queue.
+
+        Used by batch detection to record per-image sub-jobs that were run
+        inline (not via the worker thread).
+        """
+        job_id = uuid.uuid4().hex[:12]
+        now = datetime.now()
+        job = Job(
+            id=job_id,
+            type=job_type,
+            params=params,
+            status=JobStatus.COMPLETED,
+            progress=1.0,
+            result=result,
+            created_at=now,
+            started_at=now,
+            completed_at=now,
+        )
+        with self._lock:
+            self._jobs[job_id] = job
+        return job
+
     def subscribe(self, job_id: str, callback: Callable):
         """Subscribe to progress updates for a job."""
         with self._lock:

@@ -90,6 +90,35 @@ export interface DetectionRequest {
   device?: string
 }
 
+export interface Project {
+  id: string
+  name: string
+  description: string
+  created_by: string
+  created_at: string
+  updated_at: string
+  image_count: number
+  thumbnail_image_id: string | null
+}
+
+export interface ProjectImage {
+  id: string
+  project_id: string
+  image_id: string
+  filename: string
+  added_by: string
+  added_at: string
+  detection_job_id: string | null
+  measurement_job_id: string | null
+  has_annotation: boolean
+  annotation_total: number
+  annotation_accepted: number
+}
+
+export interface ProjectDetail extends Project {
+  images: ProjectImage[]
+}
+
 export interface MeasurementRequest {
   image_id: string
   detections_csv: string

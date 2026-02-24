@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 YOLO-based detection and measurement pipeline for collembola organisms in ultra-high-resolution microscope images (~10K×10K pixels). Uses tiled inference instead of downscaling to preserve detail, achieving 99.2% mAP@0.5. Licensed AGPL-3.0 (required by Ultralytics dependency).
 
+A full web UI wraps the pipeline: users upload images, run detection, edit annotations, measure organisms, and share results via a collaborative database.
+
 ## Environment Setup
 
 ```bash
@@ -65,6 +67,8 @@ ImageJ ROIs → CSV → Tiled Dataset → YOLO Training → Model (.pt)
 
 Large Image → Tiled Inference → Detections CSV → Measurements → Final CSV
                                       ↓
+                              Annotation Editing → Community DB
+                                      ↓
                                 Overlay Visualization
 ```
 
@@ -76,6 +80,8 @@ Images are split into 1280×1280 tiles with 256px overlap (stride=1024). Each ti
 - **`collembola_pipeline/`** — Reusable Python package. `config.py` is the central configuration with all thresholds, paths, and SAM parameters.
 - **`models/`** — Pre-trained YOLO model (`yolo11n_tiled_best.pt`, 5.4 MB).
 - **`data/`** — Images, annotations, datasets (gitignored).
+- **`data/annotations/`** — Per-image annotation JSON files (`{image_id}.json`), saved from the web UI.
+- **`data/community.db`** — SQLite database for collaborative submissions.
 - **`archive_unused/`** — Previous approaches (classical CV + SAM proposals) kept for reference.
 
 ### Two Detection Approaches
@@ -85,9 +91,16 @@ Images are split into 1280×1280 tiles with 256px overlap (stride=1024). Each ti
 ### Measurement Methods
 Both methods take YOLO detection boxes and produce per-organism measurements (length, width, area, volume). Volume uses a cylinder model: `V = π × r² × h`. The fast method fits ellipses via eigenvalue decomposition on binary masks; the SAM method generates precise contours.
 
+When `use_annotations=True` is passed to the measurement endpoint, the backend reads the saved annotation JSON for that image, filters out rejected boxes, and generates a temporary detections CSV. This allows measurements to reflect manual edits.
+
 ### Web UI
-- **`backend/`** — FastAPI app serving REST API + WebSocket for job progress. Run with `uvicorn backend.main:app --reload`.
+- **`backend/`** — FastAPI app. Run with `uvicorn backend.main:app --reload`.
 - **`frontend/`** — React + Vite + TypeScript + Tailwind CSS. Run with `cd frontend && npm run dev`.
+- Deployed with `root_path="/collembola"` behind a reverse proxy.
+
+### Web UI Pages
+- **`/`** — Workspace: upload image → run detection → edit annotations → measure → export.
+- **`/collaborate`** — Collaborate: browse community submissions, load boxes from another user's analysis, submit your own results.
 
 ### Web UI Development
 ```bash
@@ -100,9 +113,39 @@ make dev
 # Or run individually
 make backend
 make frontend
+
+# Production build (served from backend's /files/dist)
+cd frontend && npm run build
 ```
 
 The frontend proxies `/api`, `/ws`, and `/files` to the backend via Vite config.
+
+### Auth & Roles
+- JWT-based auth (`backend/auth.py`). Roles: `user`, `admin`.
+- Default accounts: `user1/user12345` (user), `admin/admin12345` (admin).
+- Fine-tuning panel is admin-only. All other features available to all authenticated users.
+- Login redirects to `/collaborate`.
+
+### Annotation Editing (Edit Detections mode)
+Boxes have three statuses:
+- **`accepted`** — original YOLO detection, kept (green overlay)
+- **`rejected`** — marked invalid by user, excluded from measurements but preserved for fine-tuning (red overlay, cross-out)
+- **`added`** — manually drawn by user (blue dashed overlay)
+
+Boxes with IoU ≥ 0.5 against another non-rejected box are highlighted orange as suspected duplicates.
+
+Annotations are saved to `data/annotations/{image_id}.json` and auto-restored when the same detection job is loaded.
+
+### Collaborate / Community DB
+- `backend/db.py` — SQLite with `community_detections` table.
+- `backend/routers/community.py` — REST endpoints: submit, list, stats, get by id, export (JSON/CSV).
+- Submissions are **upserted** keyed on `(username, image_id)` — re-submitting the same image updates the existing record rather than creating a duplicate.
+- `frontend/src/store/communityLoadStore.ts` — in-memory store for boxes pending load into workspace.
+
+### Frontend State Persistence
+- `frontend/src/store/workspaceStore.ts` — persists `image`, `detectionJobId`, `measureJobId` to localStorage so workspace survives page refresh.
+- `frontend/src/store/calibrationStore.ts` — persists `umPerPixel` across sessions.
+- `frontend/src/store/authStore.ts` — persists JWT token and role.
 
 ## Conventions
 
@@ -112,3 +155,4 @@ The frontend proxies `/api`, `/ws`, and `/files` to the backend via Vite config.
 - Calibration (`--um-per-pixel`) is critical — all physical measurements depend on it
 - GPU is auto-detected; all scripts fall back to CPU
 - PEP 8 style; docstrings on main functions
+- Frontend: Zustand for global state, TanStack Table for measurement display, React Router v6

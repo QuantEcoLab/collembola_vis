@@ -15,7 +15,7 @@ import {
   imageUrl,
   outputFileUrl,
   annotationExportUrl,
-  submitToCommunity,
+  updateProjectImageJobs,
 } from '../api/client'
 import { useJobProgress } from '../hooks/useJob'
 import { useRefinement } from '../hooks/useRefinement'
@@ -23,6 +23,7 @@ import { useCalibrationStore } from '../store/calibrationStore'
 import { useAuthStore } from '../store/authStore'
 import { useCommunityLoadStore } from '../store/communityLoadStore'
 import { useWorkspaceStore } from '../store/workspaceStore'
+import { useProjectStore } from '../store/projectStore'
 import type { ImageInfo } from '../api/types'
 
 export default function WorkspacePage() {
@@ -33,6 +34,7 @@ export default function WorkspacePage() {
   const setCalibrationStore = useCalibrationStore((s) => s.setCalibration)
   const communityLoad = useCommunityLoadStore()
   const workspaceStore = useWorkspaceStore()
+  const { currentProjectId, currentProjectName } = useProjectStore()
 
   // ── Image ──────────────────────────────────────────────────────────
   const [image, setImageState] = useState<ImageInfo | null>(workspaceStore.image)
@@ -71,8 +73,6 @@ export default function WorkspacePage() {
   const [showAnnotations, setShowAnnotations] = useState(true)
   const [refineSaveError, setRefineSaveError] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState<string | undefined>()
-  const [submitStatus, setSubmitStatus] = useState<'idle' | 'submitting' | 'ok' | 'error'>('idle')
-  const [submitError, setSubmitError] = useState<string | null>(null)
   const refinement = useRefinement(
     image?.image_id ?? null,
     detectionDone ? detectionJobId : null,
@@ -153,6 +153,21 @@ export default function WorkspacePage() {
         .catch(() => {})
     }
   }, [measureJob?.status, measureJob?.result?.csv_path, measureJob?.id])
+
+  // Auto-sync detection/measurement job IDs back to the project when in project context
+  useEffect(() => {
+    if (!currentProjectId || !image || !detectionJobId) return
+    if (detectionJob?.status !== 'completed') return
+    updateProjectImageJobs(currentProjectId, image.image_id, { detection_job_id: detectionJobId })
+      .catch(() => {})
+  }, [detectionJob?.status, detectionJobId, currentProjectId, image?.image_id])
+
+  useEffect(() => {
+    if (!currentProjectId || !image || !measureJobId) return
+    if (measureJob?.status !== 'completed') return
+    updateProjectImageJobs(currentProjectId, image.image_id, { measurement_job_id: measureJobId })
+      .catch(() => {})
+  }, [measureJob?.status, measureJobId, currentProjectId, image?.image_id])
 
   // ── Handlers ───────────────────────────────────────────────────────
 
@@ -256,8 +271,6 @@ export default function WorkspacePage() {
     setRefineMode(false)
     setDrawMode(false)
     setRefineSaveError(null)
-    setSubmitStatus('idle')
-    setSubmitError(null)
     communityLoad.clear()
   }
 
@@ -271,27 +284,6 @@ export default function WorkspacePage() {
     }
   }
 
-  const handleSubmitCommunity = async () => {
-    if (!image) return
-    setSubmitStatus('submitting')
-    setSubmitError(null)
-    try {
-      await submitToCommunity({
-        image_id: image.image_id,
-        image_name: image.filename,
-        image_width: image.width,
-        image_height: image.height,
-        um_per_pixel: umPerPixel,
-        conf_threshold: conf,
-        boxes: refinement.boxes.filter((b) => b.status !== 'rejected'),
-      })
-      setSubmitStatus('ok')
-    } catch (e: any) {
-      setSubmitStatus('error')
-      setSubmitError(e.message)
-    }
-  }
-
   // ── Render ─────────────────────────────────────────────────────────
 
   return (
@@ -301,17 +293,25 @@ export default function WorkspacePage() {
         <div className="flex items-center gap-5">
           <span className="font-semibold text-gray-900">Collembola</span>
           <nav className="flex items-center gap-1">
+            {currentProjectId && (
+              <Link
+                to={`/projects/${currentProjectId}`}
+                className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors flex items-center gap-1"
+              >
+                ← {currentProjectName ?? 'Project'}
+              </Link>
+            )}
+            <Link
+              to="/projects"
+              className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+            >
+              Projects
+            </Link>
             <Link
               to="/"
               className="text-sm px-3 py-1 rounded-md bg-gray-100 text-gray-900 font-medium transition-colors"
             >
               Workspace
-            </Link>
-            <Link
-              to="/collaborate"
-              className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
-            >
-              Collaborate
             </Link>
           </nav>
           {image && (
@@ -687,42 +687,21 @@ export default function WorkspacePage() {
                 </>
               )}
 
-              {/* Community submit — unlocks after detection */}
-              {detectionDone && (
+              {/* Project context indicator — shown when in project and detection done */}
+              {detectionDone && currentProjectId && (
                 <>
                   <Divider />
-                  <section className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Collaborate</Label>
+                  <section className="space-y-1.5">
+                    <Label>Project</Label>
+                    <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1.5">
+                      ✓ Results saved to{' '}
                       <Link
-                        to="/collaborate"
-                        className="text-xs text-blue-500 hover:underline"
+                        to={`/projects/${currentProjectId}`}
+                        className="font-medium hover:underline"
                       >
-                        Browse →
+                        {currentProjectName ?? 'project'}
                       </Link>
-                    </div>
-                    <button
-                      onClick={handleSubmitCommunity}
-                      disabled={submitStatus === 'submitting' || submitStatus === 'ok'}
-                      className="w-full py-2 bg-teal-600 text-white rounded-lg text-sm font-medium hover:bg-teal-700 disabled:opacity-50 transition-colors"
-                    >
-                      {submitStatus === 'submitting'
-                        ? 'Submitting…'
-                        : submitStatus === 'ok'
-                        ? '✓ Submitted!'
-                        : `Submit ${refinement.boxes.filter((b) => b.status !== 'rejected').length} detections`}
-                    </button>
-                    {submitStatus === 'error' && submitError && (
-                      <p className="text-xs text-red-600">{submitError}</p>
-                    )}
-                    {submitStatus === 'ok' && (
-                      <Link
-                        to="/collaborate"
-                        className="block text-center text-xs text-teal-700 hover:underline"
-                      >
-                        View in Collaborate →
-                      </Link>
-                    )}
+                    </p>
                   </section>
                 </>
               )}

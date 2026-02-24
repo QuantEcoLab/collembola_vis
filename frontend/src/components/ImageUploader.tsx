@@ -5,13 +5,16 @@ import type { ImageInfo } from '../api/types'
 
 interface Props {
   onUploaded: (info: ImageInfo) => void
+  multiple?: boolean
 }
 
-export default function ImageUploader({ onUploaded }: Props) {
+export default function ImageUploader({ onUploaded, multiple = false }: Props) {
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadPct, setUploadPct] = useState(0)
-  const [error, setError] = useState<string | null>(null)
+  const [uploadIndex, setUploadIndex] = useState(0)   // 1-based current file index
+  const [uploadTotal, setUploadTotal] = useState(0)
+  const [errors, setErrors] = useState<string[]>([])
 
   // Server-path tab
   const [serverPath, setServerPath] = useState('')
@@ -21,31 +24,39 @@ export default function ImageUploader({ onUploaded }: Props) {
   const handleFiles = useCallback(
     async (files: FileList | null) => {
       if (!files?.length) return
-      setError(null)
+      const list = Array.from(files)
+      setErrors([])
       setUploading(true)
-      setUploadPct(0)
-      try {
-        const info = await uploadImage(files[0], setUploadPct)
-        onUploaded(info)
-      } catch (e: any) {
-        setError(e.message || 'Upload failed')
-      } finally {
-        setUploading(false)
+      setUploadTotal(list.length)
+      const errs: string[] = []
+      for (let i = 0; i < list.length; i++) {
+        setUploadIndex(i + 1)
         setUploadPct(0)
+        try {
+          const info = await uploadImage(list[i], setUploadPct)
+          onUploaded(info)
+        } catch (e: any) {
+          errs.push(`${list[i].name}: ${e.message || 'Upload failed'}`)
+        }
       }
+      setUploading(false)
+      setUploadPct(0)
+      setUploadIndex(0)
+      setUploadTotal(0)
+      if (errs.length) setErrors(errs)
     },
     [onUploaded],
   )
 
   const handleServerPath = async () => {
     if (!serverPath.trim()) return
-    setError(null)
+    setErrors([])
     setRegisteringPath(true)
     try {
       const info = await registerFromPath(serverPath.trim())
       onUploaded(info)
     } catch (e: any) {
-      setError(e.message || 'Failed to load image')
+      setErrors([e.message || 'Failed to load image'])
     } finally {
       setRegisteringPath(false)
     }
@@ -56,7 +67,7 @@ export default function ImageUploader({ onUploaded }: Props) {
       {/* Tab switcher */}
       <div className="flex gap-1 text-sm">
         <button
-          onClick={() => { setTab('upload'); setError(null) }}
+          onClick={() => { setTab('upload'); setErrors([]) }}
           className={`px-3 py-1.5 rounded-lg border ${
             tab === 'upload'
               ? 'bg-blue-50 border-blue-300 text-blue-700'
@@ -66,7 +77,7 @@ export default function ImageUploader({ onUploaded }: Props) {
           Upload file
         </button>
         <button
-          onClick={() => { setTab('server'); setError(null) }}
+          onClick={() => { setTab('server'); setErrors([]) }}
           className={`px-3 py-1.5 rounded-lg border ${
             tab === 'server'
               ? 'bg-blue-50 border-blue-300 text-blue-700'
@@ -94,6 +105,7 @@ export default function ImageUploader({ onUploaded }: Props) {
             const input = document.createElement('input')
             input.type = 'file'
             input.accept = 'image/*'
+            if (multiple) input.multiple = true
             input.onchange = () => handleFiles(input.files)
             input.click()
           }}
@@ -103,7 +115,13 @@ export default function ImageUploader({ onUploaded }: Props) {
           {uploading ? (
             <div className="space-y-3">
               <p className="text-sm text-gray-600">
-                {uploadPct < 100 ? `Uploading… ${uploadPct}%` : 'Processing image…'}
+                {uploadTotal > 1
+                  ? uploadPct < 100
+                    ? `Uploading ${uploadIndex}/${uploadTotal}… ${uploadPct}%`
+                    : `Processing ${uploadIndex}/${uploadTotal}…`
+                  : uploadPct < 100
+                  ? `Uploading… ${uploadPct}%`
+                  : 'Processing image…'}
               </p>
               <div className="w-full max-w-xs mx-auto bg-gray-200 rounded-full h-2.5 overflow-hidden">
                 {uploadPct === 0 ? (
@@ -115,16 +133,16 @@ export default function ImageUploader({ onUploaded }: Props) {
                   />
                 )}
               </div>
-              {uploadPct === 100 && (
-                <p className="text-xs text-gray-400">Generating thumbnail…</p>
-              )}
             </div>
           ) : (
             <>
               <p className="text-sm text-gray-600">
-                Drag & drop an image here, or <span className="text-blue-600 underline">browse</span>
+                Drag & drop {multiple ? 'images' : 'an image'} here, or{' '}
+                <span className="text-blue-600 underline">browse</span>
               </p>
-              <p className="text-xs text-gray-400 mt-1">Supports JPG, PNG, TIFF</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Supports JPG, PNG, TIFF{multiple ? ' · select multiple files' : ''}
+              </p>
             </>
           )}
         </div>
@@ -158,7 +176,13 @@ export default function ImageUploader({ onUploaded }: Props) {
         </div>
       )}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {errors.length > 0 && (
+        <div className="space-y-0.5">
+          {errors.map((e, i) => (
+            <p key={i} className="text-sm text-red-600">{e}</p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

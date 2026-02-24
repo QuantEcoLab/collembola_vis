@@ -8,13 +8,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import db
+from backend import db, db_projects
 from backend.auth import router as auth_router
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobType
-from backend.routers import annotations, calibration, community, detection, finetune, images, jobs, measurement
+from backend.routers import annotations, calibration, community, detection, finetune, images, jobs, measurement, projects
 from backend.routers import models as models_router
+from backend.services.batch_detection import run_batch_detection
 from backend.services.detection import run_detection
 from backend.services.finetune import run_finetune
 from backend.services.measurement import run_measurement
@@ -28,11 +29,13 @@ async def lifespan(app: FastAPI):
     """Startup / shutdown."""
     settings.ensure_dirs()
     db.init_db()
+    db_projects.init_project_db()
 
     # Register job handlers
     job_manager.register_handler(JobType.DETECTION, run_detection)
     job_manager.register_handler(JobType.MEASUREMENT, run_measurement)
     job_manager.register_handler(JobType.FINETUNE, run_finetune)
+    job_manager.register_handler(JobType.BATCH, run_batch_detection)
 
     yield
 
@@ -64,6 +67,7 @@ app.include_router(annotations.router)
 app.include_router(models_router.router)
 app.include_router(finetune.router)
 app.include_router(community.router)
+app.include_router(projects.router)
 
 # WebSocket
 app.include_router(ws_router)

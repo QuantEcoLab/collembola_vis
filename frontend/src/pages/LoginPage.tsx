@@ -31,8 +31,8 @@ export default function LoginPage() {
         headers: { Authorization: `Bearer ${token}` },
       })
       const me = meRes.ok ? await meRes.json() : { role: 'user' }
-      login(token, me.role ?? 'user')
-      navigate('/collaborate', { replace: true })
+      login(token, me.role ?? 'user', me.username)
+      navigate('/projects', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Login failed')
     } finally {

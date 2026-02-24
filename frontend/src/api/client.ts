@@ -9,6 +9,8 @@ import type {
   Job,
   MeasurementRequest,
   ModelInfo,
+  Project,
+  ProjectDetail,
 } from './types'
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')  // Use Vite's BASE_URL, remove trailing slash
@@ -226,3 +228,54 @@ export const getCommunityStats = () =>
 
 export const communityExportUrl = (id: string, format: 'json' | 'csv') =>
   `${BASE}/api/community/${id}/export?format=${format}`
+
+// Projects
+export const listProjects = () => request<Project[]>('/api/projects')
+
+export const getProject = (id: string) => request<ProjectDetail>(`/api/projects/${id}`)
+
+export const createProject = (name: string, description: string) =>
+  request<{ id: string; name: string }>('/api/projects', {
+    method: 'POST',
+    body: JSON.stringify({ name, description }),
+  })
+
+export const updateProject = (id: string, name: string, description: string) =>
+  request<{ ok: boolean }>(`/api/projects/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name, description }),
+  })
+
+export const deleteProject = (id: string) =>
+  request<{ ok: boolean }>(`/api/projects/${id}`, { method: 'DELETE' })
+
+export const addImageToProject = (projectId: string, imageId: string, filename: string) =>
+  request<{ id: string }>(`/api/projects/${projectId}/images`, {
+    method: 'POST',
+    body: JSON.stringify({ image_id: imageId, filename }),
+  })
+
+export const removeImageFromProject = (projectId: string, imageId: string) =>
+  request<{ ok: boolean }>(`/api/projects/${projectId}/images/${imageId}`, { method: 'DELETE' })
+
+export const runBatchDetection = (
+  projectId: string,
+  params: { conf?: number; tile_size?: number; overlap?: number; device?: string },
+) =>
+  request<{ job_id: string; status: string }>(`/api/projects/${projectId}/detect`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
+export const updateProjectImageJobs = (
+  projectId: string,
+  imageId: string,
+  jobs: { detection_job_id?: string; measurement_job_id?: string },
+) =>
+  request<{ ok: boolean }>(`/api/projects/${projectId}/images/${imageId}/jobs`, {
+    method: 'PATCH',
+    body: JSON.stringify(jobs),
+  })
+
+export const projectAnnotationsExportUrl = (projectId: string, format: 'json' | 'csv') =>
+  `${BASE}/api/projects/${projectId}/annotations/export?format=${format}`
