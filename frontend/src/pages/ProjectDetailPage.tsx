@@ -259,7 +259,7 @@ export default function ProjectDetailPage() {
         workspaceStore.setDetectionJobId(null)
       }
       workspaceStore.setMeasureJobId(null)
-      navigate('/')
+      navigate('/workspace')
     } catch {
       // ignore
     }
@@ -343,7 +343,7 @@ export default function ProjectDetailPage() {
               Projects
             </Link>
             <Link
-              to="/"
+              to="/workspace"
               className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
             >
               Workspace

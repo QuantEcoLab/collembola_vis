@@ -323,7 +323,7 @@ export default function WorkspacePage() {
               Projects
             </Link>
             <Link
-              to="/"
+              to="/workspace"
               className="text-sm px-3 py-1 rounded-md bg-gray-100 text-gray-900 font-medium transition-colors"
             >
               Workspace
