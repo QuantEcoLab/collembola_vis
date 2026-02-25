@@ -87,6 +87,12 @@ class UpdateJobsRequest(BaseModel):
     measurement_job_id: str | None = None
 
 
+class BatchMeasureRequest(BaseModel):
+    um_per_pixel: float
+    method: str = "fast"
+    device: str | None = None
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("")
@@ -281,3 +287,45 @@ async def update_image_jobs(
     if req.measurement_job_id is not None:
         db_projects.set_measurement_job(project_id, image_id, req.measurement_job_id)
     return {"ok": True}
+
+
+@router.post("/{project_id}/measure")
+async def batch_measure(
+    project_id: str,
+    req: BatchMeasureRequest,
+    username: str = Depends(get_current_user),
+):
+    project = db_projects.get_project(project_id)
+    if project is None:
+        raise HTTPException(404, "Project not found")
+
+    images = [_enrich_image(img) for img in project["images"]]
+    measurable = [img for img in images if img["detection_job_id"] or img["has_annotation"]]
+    if not measurable:
+        raise HTTPException(400, "No images with detections or annotations")
+
+    image_entries = []
+    for img in measurable:
+        info = get_image_info(img["image_id"])
+        if info is None:
+            continue
+        image_entries.append({
+            "image_id": img["image_id"],
+            "image_path": info["path"],
+            "filename": img["filename"],
+            "detection_job_id": img["detection_job_id"],
+            "use_annotations": img["has_annotation"],
+        })
+
+    if not image_entries:
+        raise HTTPException(400, "No valid images found in project")
+
+    params = {
+        "project_id": project_id,
+        "image_entries": image_entries,
+        "um_per_pixel": req.um_per_pixel,
+        "method": req.method,
+        "device": req.device,
+    }
+    job = job_manager.submit(JobType.BATCH_MEASURE, params)
+    return {"job_id": job.id, "status": job.status.value}

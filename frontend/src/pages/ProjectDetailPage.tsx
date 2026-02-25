@@ -11,12 +11,18 @@ import {
   Loader2,
   Download,
   FileText,
+  CheckSquare,
+  Square,
+  LayoutGrid,
+  AlignJustify,
+  Ruler,
 } from 'lucide-react'
 import {
   getProject,
   addImageToProject,
   removeImageFromProject,
   runBatchDetection,
+  runBatchMeasurement,
   thumbnailUrl,
   getImage,
   updateProject,
@@ -26,10 +32,51 @@ import {
 import { useAuthStore } from '../store/authStore'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { useProjectStore } from '../store/projectStore'
+import { useCalibrationStore } from '../store/calibrationStore'
 import { useJobProgress } from '../hooks/useJob'
 import ImageUploader from '../components/ImageUploader'
 import JobProgress from '../components/JobProgress'
 import type { ProjectDetail, ProjectImage, ImageInfo } from '../api/types'
+
+// ── Pipeline status indicator ────────────────────────────────────────────────
+
+type PipelineStep = { label: string; done: boolean; color: string }
+
+function PipelineStatus({ img }: { img: ProjectImage }) {
+  const steps: PipelineStep[] = [
+    { label: 'up',   done: true,                        color: 'bg-gray-400' },
+    { label: 'det',  done: !!img.detection_job_id,      color: 'bg-green-500' },
+    { label: 'ann',  done: !!img.has_annotation,        color: 'bg-amber-500' },
+    { label: 'meas', done: !!img.measurement_job_id,    color: 'bg-blue-500' },
+  ]
+  return (
+    <div className="flex items-center gap-0.5 mt-1.5">
+      {steps.map((step, idx) => (
+        <div key={step.label} className="flex items-center gap-0.5">
+          {idx > 0 && (
+            <div className={`flex-1 h-px w-3 ${steps[idx].done ? step.color : 'bg-gray-200'}`} />
+          )}
+          <div
+            title={step.label}
+            className={`w-2 h-2 rounded-full shrink-0 ${step.done ? step.color : 'bg-gray-200'}`}
+          />
+        </div>
+      ))}
+      <div className="flex gap-1 ml-1">
+        {steps.map((step) => (
+          <span key={step.label} className="text-[9px] text-gray-400 w-5 text-center leading-none">
+            {step.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Main component ───────────────────────────────────────────────────────────
+
+type Filter = 'all' | 'needs-det' | 'annotated' | 'done'
+type ViewMode = 'carousel' | 'grid'
 
 export default function ProjectDetailPage() {
   const { id: projectId } = useParams<{ id: string }>()
@@ -37,7 +84,6 @@ export default function ProjectDetailPage() {
   const logout = useAuthStore((s) => s.logout)
   const storedUsername = useAuthStore((s) => s.username)
   const token = useAuthStore((s) => s.token)
-  // Derive username from store or fall back to decoding the JWT (for existing sessions)
   const username = storedUsername ?? (() => {
     try {
       if (!token) return ''
@@ -48,6 +94,7 @@ export default function ProjectDetailPage() {
 
   const workspaceStore = useWorkspaceStore()
   const { setCurrentProject } = useProjectStore()
+  const calibrationUmPerPixel = useCalibrationStore((s) => s.umPerPixel)
 
   const [project, setProject] = useState<ProjectDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -55,13 +102,29 @@ export default function ProjectDetailPage() {
   const [batchJobId, setBatchJobId] = useState<string | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkRemoving, setBulkRemoving] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
 
+  // Feature 2 — filter
+  const [filter, setFilter] = useState<Filter>('all')
+
+  // Feature 3 — view mode
+  const [viewMode, setViewMode] = useState<ViewMode>('carousel')
+
+  // Feature 5 — batch measure
+  const [measureBatchJobId, setMeasureBatchJobId] = useState<string | null>(null)
+  const [measureBatchError, setMeasureBatchError] = useState<string | null>(null)
+  const [showMeasureOptions, setShowMeasureOptions] = useState(false)
+  const [measureUmPerPixel, setMeasureUmPerPixel] = useState<string>('')
+
   const batchJob = useJobProgress(batchJobId)
+  const measureBatchJob = useJobProgress(measureBatchJobId)
 
   const load = useCallback(async () => {
     if (!projectId) return
@@ -77,21 +140,42 @@ export default function ProjectDetailPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Refresh project after batch completes to pick up new detection_job_ids
+  // Prefill um/px from calibration store when options open
+  useEffect(() => {
+    if (showMeasureOptions && !measureUmPerPixel && calibrationUmPerPixel) {
+      setMeasureUmPerPixel(String(calibrationUmPerPixel))
+    }
+  }, [showMeasureOptions, calibrationUmPerPixel, measureUmPerPixel])
+
+  // Refresh project after batch detect completes
   useEffect(() => {
     if (batchJob?.status === 'completed') {
       load()
     }
   }, [batchJob?.status, load])
 
+  // Refresh project after batch measure completes
+  useEffect(() => {
+    if (measureBatchJob?.status === 'completed') {
+      load()
+    }
+  }, [measureBatchJob?.status, load])
+
   const isOwner = project?.created_by === username
+
+  // Feature 2 — filtered images (filter doesn't affect stats)
+  const filteredImages = (project?.images ?? []).filter((img) => {
+    if (filter === 'needs-det') return !img.detection_job_id
+    if (filter === 'annotated') return !!img.has_annotation
+    if (filter === 'done') return !!img.has_annotation && !!img.measurement_job_id
+    return true
+  })
 
   const handleUploadDone = async (info: ImageInfo) => {
     if (!projectId) return
     try {
       await addImageToProject(projectId, info.image_id, info.filename)
       await load()
-      // Keep upload panel open so user can add more files
     } catch {
       // ignore
     }
@@ -109,6 +193,36 @@ export default function ProjectDetailPage() {
     }
   }
 
+  const toggleSelectMode = () => {
+    setSelectMode((v) => !v)
+    setSelectedIds(new Set())
+  }
+
+  const toggleSelect = (imageId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(imageId)) next.delete(imageId)
+      else next.add(imageId)
+      return next
+    })
+  }
+
+  const handleBulkRemove = async () => {
+    if (!projectId || selectedIds.size === 0) return
+    if (!window.confirm(`Remove ${selectedIds.size} image${selectedIds.size > 1 ? 's' : ''} from the project?`)) return
+    setBulkRemoving(true)
+    try {
+      await Promise.all([...selectedIds].map((id) => removeImageFromProject(projectId, id)))
+      setSelectedIds(new Set())
+      setSelectMode(false)
+      await load()
+    } catch {
+      // ignore
+    } finally {
+      setBulkRemoving(false)
+    }
+  }
+
   const handleBatchDetect = async () => {
     if (!projectId) return
     setBatchError(null)
@@ -117,6 +231,20 @@ export default function ProjectDetailPage() {
       setBatchJobId(res.job_id)
     } catch (e: any) {
       setBatchError(e.message)
+    }
+  }
+
+  const handleBatchMeasure = async () => {
+    if (!projectId) return
+    const umVal = parseFloat(measureUmPerPixel)
+    if (!umVal || umVal <= 0) return
+    setMeasureBatchError(null)
+    setShowMeasureOptions(false)
+    try {
+      const res = await runBatchMeasurement(projectId, { um_per_pixel: umVal })
+      setMeasureBatchJobId(res.job_id)
+    } catch (e: any) {
+      setMeasureBatchError(e.message)
     }
   }
 
@@ -166,7 +294,23 @@ export default function ProjectDetailPage() {
     try { return new Date(iso).toLocaleDateString() } catch { return iso }
   }
 
-  const detectedCount = project?.images.filter((i) => i.detection_job_id).length ?? 0
+  // Feature 1 — summary stats (always from all images, not filtered)
+  const allImages = project?.images ?? []
+  const detectedCount = allImages.filter((i) => i.detection_job_id).length
+  const annotatedCount = allImages.filter((i) => i.has_annotation).length
+  const measuredCount = allImages.filter((i) => i.measurement_job_id).length
+  const acceptedBoxes = allImages.reduce((s, i) => s + (i.annotation_accepted ?? 0), 0)
+
+  // Feature 2 — filter counts
+  const filterCounts: Record<Filter, number> = {
+    'all': allImages.length,
+    'needs-det': allImages.filter((i) => !i.detection_job_id).length,
+    'annotated': allImages.filter((i) => i.has_annotation).length,
+    'done': allImages.filter((i) => i.has_annotation && !!i.measurement_job_id).length,
+  }
+
+  // Feature 5 — measurable check
+  const measurableCount = allImages.filter((i) => i.detection_job_id || i.has_annotation).length
 
   if (loading) {
     return (
@@ -266,9 +410,7 @@ export default function ProjectDetailPage() {
                     <p className="text-sm text-gray-500 mt-0.5">{project.description}</p>
                   )}
                   <p className="text-xs text-gray-400 mt-1">
-                    Created by {project.created_by} · {fmtDate(project.created_at)} ·{' '}
-                    {project.images.length} image{project.images.length !== 1 ? 's' : ''},{' '}
-                    {detectedCount} detected
+                    Created by {project.created_by} · {fmtDate(project.created_at)}
                   </p>
                 </div>
                 {isOwner && (
@@ -298,25 +440,122 @@ export default function ProjectDetailPage() {
 
           {/* Action bar */}
           <div className="flex items-center gap-3 flex-wrap">
-            <button
-              onClick={() => setShowUpload((v) => !v)}
-              className="flex items-center gap-1.5 text-sm bg-white border rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              <Plus size={14} />
-              Add Images
-            </button>
+            {selectMode ? (
+              <>
+                <button
+                  onClick={toggleSelectMode}
+                  className="flex items-center gap-1.5 text-sm bg-white border rounded-lg px-3 py-1.5 text-gray-500 hover:bg-gray-50 transition-colors"
+                >
+                  <X size={14} />
+                  Cancel
+                </button>
 
-            {project.images.length > 0 && (
-              <button
-                onClick={handleBatchDetect}
-                disabled={batchJob?.status === 'running' || batchJob?.status === 'pending'}
-                className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
-              >
-                <Play size={13} />
-                Run Detection on All
-              </button>
+                {project.images.length > 0 && (
+                  <button
+                    onClick={() => {
+                      if (selectedIds.size === project.images.length) {
+                        setSelectedIds(new Set())
+                      } else {
+                        setSelectedIds(new Set(project.images.map((i) => i.image_id)))
+                      }
+                    }}
+                    className="flex items-center gap-1.5 text-sm bg-white border rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    {selectedIds.size === project.images.length
+                      ? <><Square size={14} /> Deselect All</>
+                      : <><CheckSquare size={14} /> Select All</>
+                    }
+                  </button>
+                )}
+
+                {selectedIds.size > 0 && (
+                  <button
+                    onClick={handleBulkRemove}
+                    disabled={bulkRemoving}
+                    className="flex items-center gap-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
+                  >
+                    {bulkRemoving
+                      ? <><Loader2 size={13} className="animate-spin" /> Removing…</>
+                      : <><Trash2 size={13} /> Remove {selectedIds.size} image{selectedIds.size > 1 ? 's' : ''}</>
+                    }
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setShowUpload((v) => !v)}
+                  className="flex items-center gap-1.5 text-sm bg-white border rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <Plus size={14} />
+                  Add Images
+                </button>
+
+                {project.images.length > 0 && (
+                  <>
+                    <button
+                      onClick={handleBatchDetect}
+                      disabled={batchJob?.status === 'running' || batchJob?.status === 'pending'}
+                      className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
+                    >
+                      <Play size={13} />
+                      Run Detection on All
+                    </button>
+
+                    {measurableCount > 0 && (
+                      <button
+                        onClick={() => setShowMeasureOptions((v) => !v)}
+                        disabled={measureBatchJob?.status === 'running' || measureBatchJob?.status === 'pending'}
+                        className="flex items-center gap-1.5 text-sm bg-teal-600 hover:bg-teal-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
+                      >
+                        <Ruler size={13} />
+                        Measure All
+                      </button>
+                    )}
+
+                    <button
+                      onClick={toggleSelectMode}
+                      className="flex items-center gap-1.5 text-sm bg-white border rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50 transition-colors"
+                    >
+                      <CheckSquare size={14} />
+                      Select
+                    </button>
+                  </>
+                )}
+              </>
             )}
           </div>
+
+          {/* Measure options inline row */}
+          {showMeasureOptions && (
+            <div className="flex items-center gap-3 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3">
+              <Ruler size={14} className="text-teal-600 shrink-0" />
+              <span className="text-sm text-teal-800 font-medium shrink-0">µm/px:</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={measureUmPerPixel}
+                onChange={(e) => setMeasureUmPerPixel(e.target.value)}
+                placeholder="e.g. 8.57"
+                className="w-28 text-sm border border-teal-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+              />
+              <button
+                onClick={handleBatchMeasure}
+                disabled={!parseFloat(measureUmPerPixel)}
+                className="text-sm bg-teal-600 hover:bg-teal-700 text-white rounded-md px-3 py-1 font-medium disabled:opacity-40 transition-colors"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={() => setShowMeasureOptions(false)}
+                className="text-gray-400 hover:text-gray-600 ml-1"
+              >
+                <X size={14} />
+              </button>
+              <span className="text-xs text-teal-600 ml-auto">{measurableCount} image{measurableCount !== 1 ? 's' : ''} will be measured</span>
+            </div>
+          )}
 
           {/* Upload area */}
           {showUpload && (
@@ -331,7 +570,7 @@ export default function ProjectDetailPage() {
             </div>
           )}
 
-          {/* Batch job progress */}
+          {/* Batch detect job progress */}
           {batchJob && (batchJob.status === 'running' || batchJob.status === 'pending') && (
             <JobProgress job={batchJob} />
           )}
@@ -347,82 +586,176 @@ export default function ProjectDetailPage() {
           )}
           {batchError && <p className="text-sm text-red-600">{batchError}</p>}
 
-          {/* Image carousel */}
+          {/* Batch measure job progress */}
+          {measureBatchJob && (measureBatchJob.status === 'running' || measureBatchJob.status === 'pending') && (
+            <JobProgress job={measureBatchJob} />
+          )}
+          {measureBatchJob?.status === 'completed' && (
+            <div className="flex items-center gap-2 text-sm text-teal-700 bg-teal-50 border border-teal-200 rounded-lg px-4 py-2">
+              <CheckCircle2 size={15} />
+              Batch measurement complete —{' '}
+              {(measureBatchJob.result as any)?.num_measured ?? 0} images measured
+            </div>
+          )}
+          {measureBatchJob?.status === 'failed' && (
+            <p className="text-sm text-red-600">{measureBatchJob.error}</p>
+          )}
+          {measureBatchError && <p className="text-sm text-red-600">{measureBatchError}</p>}
+
+          {/* Image section */}
           {project.images.length === 0 ? (
             <div className="py-20 text-center text-sm text-gray-400 bg-white border rounded-xl">
               No images yet. Click <strong>Add Images</strong> to upload.
             </div>
           ) : (
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                Images
-              </p>
-              <div className="flex gap-4 overflow-x-auto pb-3">
-                {project.images.map((img) => (
-                  <div
-                    key={img.id}
-                    className="shrink-0 w-44 bg-white border rounded-xl overflow-hidden group relative"
-                  >
-                    {/* Thumbnail */}
-                    <button
-                      onClick={() => handleOpenInWorkspace(img)}
-                      className="block w-full h-32 bg-gray-100 relative overflow-hidden"
-                      title="Open in Workspace"
-                    >
-                      <img
-                        src={thumbnailUrl(img.image_id)}
-                        alt={img.filename}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                      {/* Status badges */}
-                      <div className="absolute bottom-1.5 left-1.5 flex gap-1 flex-wrap">
-                        {img.detection_job_id && (
-                          <span className="bg-green-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                            ✓ det
-                          </span>
-                        )}
-                        {img.has_annotation && (
-                          <span className="bg-amber-500 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                            ✓ annot
-                          </span>
-                        )}
-                        {img.measurement_job_id && (
-                          <span className="bg-blue-600 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                            ✓ meas
-                          </span>
-                        )}
-                        {!img.detection_job_id && batchJob?.status === 'running' && (
-                          <span className="bg-gray-500 text-white text-[10px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5">
-                            <Loader2 size={8} className="animate-spin" />
-                            …
-                          </span>
-                        )}
-                      </div>
-                    </button>
-
-                    {/* Filename + contributor + remove */}
-                    <div className="px-2 py-2 flex items-center justify-between gap-1">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gray-600 truncate" title={img.filename}>
-                          {img.filename}
-                        </p>
-                        <p className="text-[10px] text-gray-400 truncate">{img.added_by}</p>
-                      </div>
-                      <button
-                        onClick={() => handleRemoveImage(img)}
-                        disabled={removingId === img.image_id}
-                        className="text-gray-300 hover:text-red-500 transition-colors shrink-0 disabled:opacity-50"
-                        title="Remove from project"
-                      >
-                        {removingId === img.image_id
-                          ? <Loader2 size={12} className="animate-spin" />
-                          : <Trash2 size={12} />
-                        }
-                      </button>
-                    </div>
-                  </div>
-                ))}
+              {/* Section header: Images label + summary stats + view toggle */}
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                  Images
+                </p>
+                {/* Feature 3 — view mode toggle */}
+                <button
+                  onClick={() => setViewMode((v) => v === 'carousel' ? 'grid' : 'carousel')}
+                  className="text-gray-400 hover:text-gray-700 transition-colors"
+                  title={viewMode === 'carousel' ? 'Switch to grid' : 'Switch to carousel'}
+                >
+                  {viewMode === 'carousel' ? <LayoutGrid size={15} /> : <AlignJustify size={15} />}
+                </button>
               </div>
+
+              {/* Feature 1 — Summary stats bar */}
+              <div className="flex items-center gap-2 text-xs mb-3 flex-wrap">
+                <span className="text-gray-500">{allImages.length} image{allImages.length !== 1 ? 's' : ''}</span>
+                <span className="text-gray-300">·</span>
+                <span className="text-green-600">{detectedCount} detected</span>
+                <span className="text-gray-300">·</span>
+                <span className="text-amber-600">{annotatedCount} annotated</span>
+                <span className="text-gray-300">·</span>
+                <span className="text-blue-600">{measuredCount} measured</span>
+                {acceptedBoxes > 0 && (
+                  <>
+                    <span className="text-gray-300">·</span>
+                    <span className="text-teal-600">{acceptedBoxes.toLocaleString()} accepted boxes</span>
+                  </>
+                )}
+              </div>
+
+              {/* Feature 2 — Filter bar */}
+              <div className="flex items-center gap-1.5 mb-4 flex-wrap">
+                {(['all', 'needs-det', 'annotated', 'done'] as Filter[]).map((f) => {
+                  const labels: Record<Filter, string> = {
+                    'all': 'All',
+                    'needs-det': 'Needs detection',
+                    'annotated': 'Annotated',
+                    'done': 'Done',
+                  }
+                  const active = filter === f
+                  return (
+                    <button
+                      key={f}
+                      onClick={() => {
+                        setFilter(f)
+                        setSelectedIds(new Set())
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                        active
+                          ? 'bg-gray-800 text-white border-gray-800'
+                          : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
+                      }`}
+                    >
+                      {labels[f]} <span className={active ? 'text-gray-300' : 'text-gray-400'}>{filterCounts[f]}</span>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {filteredImages.length === 0 ? (
+                <p className="text-sm text-gray-400 py-8 text-center">No images match this filter.</p>
+              ) : (
+                <div className={
+                  viewMode === 'carousel'
+                    ? 'flex gap-4 overflow-x-auto pb-3'
+                    : 'grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-3'
+                }>
+                  {filteredImages.map((img) => {
+                    const isSelected = selectedIds.has(img.image_id)
+                    return (
+                      <div
+                        key={img.id}
+                        className={`${viewMode === 'carousel' ? 'shrink-0 w-44' : 'w-full'} bg-white border rounded-xl overflow-hidden group relative transition-all ${
+                          isSelected ? 'ring-2 ring-blue-500 border-blue-500' : ''
+                        }`}
+                      >
+                        {/* Thumbnail */}
+                        <button
+                          onClick={() => selectMode ? toggleSelect(img.image_id) : handleOpenInWorkspace(img)}
+                          className="block w-full h-32 bg-gray-100 relative overflow-hidden"
+                          title={selectMode ? (isSelected ? 'Deselect' : 'Select') : 'Open in Workspace'}
+                        >
+                          <img
+                            src={thumbnailUrl(img.image_id)}
+                            alt={img.filename}
+                            className={`w-full h-full object-cover transition-transform duration-300 ${
+                              selectMode ? '' : 'group-hover:scale-105'
+                            } ${isSelected ? 'opacity-70' : ''}`}
+                          />
+
+                          {/* Selection overlay */}
+                          {selectMode && (
+                            <div className={`absolute inset-0 flex items-center justify-center transition-colors ${
+                              isSelected ? 'bg-blue-500/20' : 'hover:bg-gray-900/10'
+                            }`}>
+                              {isSelected && (
+                                <div className="bg-blue-600 rounded-full p-1">
+                                  <CheckCircle2 size={20} className="text-white" />
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Running indicator */}
+                          {!img.detection_job_id && batchJob?.status === 'running' && (
+                            <div className="absolute bottom-1.5 left-1.5">
+                              <span className="bg-gray-500 text-white text-[10px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                <Loader2 size={8} className="animate-spin" />
+                                …
+                              </span>
+                            </div>
+                          )}
+                        </button>
+
+                        {/* Filename + contributor + remove */}
+                        <div className="px-2 py-2">
+                          <div className="flex items-center justify-between gap-1">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs text-gray-600 truncate" title={img.filename}>
+                                {img.filename}
+                              </p>
+                              <p className="text-[10px] text-gray-400 truncate">{img.added_by}</p>
+                            </div>
+                            {!selectMode && (
+                              <button
+                                onClick={() => handleRemoveImage(img)}
+                                disabled={removingId === img.image_id}
+                                className="text-gray-300 hover:text-red-500 transition-colors shrink-0 disabled:opacity-50"
+                                title="Remove from project"
+                              >
+                                {removingId === img.image_id
+                                  ? <Loader2 size={12} className="animate-spin" />
+                                  : <Trash2 size={12} />
+                                }
+                              </button>
+                            )}
+                          </div>
+                          {/* Feature 4 — Pipeline status */}
+                          <PipelineStatus img={img} />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -430,7 +763,7 @@ export default function ProjectDetailPage() {
           {(() => {
             const annotated = project.images.filter((i) => i.has_annotation)
             const totalBoxes = annotated.reduce((s, i) => s + i.annotation_total, 0)
-            const acceptedBoxes = annotated.reduce((s, i) => s + i.annotation_accepted, 0)
+            const acceptedBoxesAll = annotated.reduce((s, i) => s + i.annotation_accepted, 0)
             if (annotated.length === 0) return null
             return (
               <div className="bg-white border rounded-xl p-5 space-y-4">
@@ -471,8 +804,8 @@ export default function ProjectDetailPage() {
                   <p className="text-xs text-gray-500">
                     {annotated.length}/{project.images.length} images annotated
                     {' · '}
-                    <span className="font-medium text-gray-700">{acceptedBoxes.toLocaleString()}</span> accepted boxes
-                    {acceptedBoxes !== totalBoxes && (
+                    <span className="font-medium text-gray-700">{acceptedBoxesAll.toLocaleString()}</span> accepted boxes
+                    {acceptedBoxesAll !== totalBoxes && (
                       <span className="text-gray-400"> / {totalBoxes.toLocaleString()} total</span>
                     )}
                   </p>

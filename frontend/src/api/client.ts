@@ -267,6 +267,15 @@ export const runBatchDetection = (
     body: JSON.stringify(params),
   })
 
+export const runBatchMeasurement = (
+  projectId: string,
+  params: { um_per_pixel: number; method?: string; device?: string },
+) =>
+  request<{ job_id: string; status: string }>(`/api/projects/${projectId}/measure`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
 export const updateProjectImageJobs = (
   projectId: string,
   imageId: string,

@@ -16,6 +16,7 @@ from backend.jobs.models import JobType
 from backend.routers import annotations, calibration, community, detection, finetune, images, jobs, measurement, projects
 from backend.routers import models as models_router
 from backend.services.batch_detection import run_batch_detection
+from backend.services.batch_measurement import run_batch_measurement
 from backend.services.detection import run_detection
 from backend.services.finetune import run_finetune
 from backend.services.measurement import run_measurement
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI):
     job_manager.register_handler(JobType.MEASUREMENT, run_measurement)
     job_manager.register_handler(JobType.FINETUNE, run_finetune)
     job_manager.register_handler(JobType.BATCH, run_batch_detection)
+    job_manager.register_handler(JobType.BATCH_MEASURE, run_batch_measurement)
 
     yield
 
