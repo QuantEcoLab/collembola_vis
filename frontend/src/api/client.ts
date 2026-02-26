@@ -2,8 +2,6 @@ import type {
   AnnotatedBox,
   AnnotationFile,
   CalibrationResult,
-  CommunityEntry,
-  CommunityStats,
   DetectionRequest,
   ImageInfo,
   Job,
@@ -196,38 +194,6 @@ export const runFinetune = (req: FinetuneRequest) =>
     method: 'POST',
     body: JSON.stringify(req),
   })
-
-// Community
-export interface CommunitySubmitRequest {
-  image_id: string
-  image_name: string
-  image_width?: number | null
-  image_height?: number | null
-  um_per_pixel?: number | null
-  conf_threshold?: number | null
-  boxes: AnnotatedBox[]
-}
-
-export const submitToCommunity = (req: CommunitySubmitRequest) =>
-  request<{ id: string; num_detections: number }>('/api/community/submit', {
-    method: 'POST',
-    body: JSON.stringify(req),
-  })
-
-export const listCommunity = (limit = 20, offset = 0, search = '') => {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
-  if (search) params.set('search', search)
-  return request<CommunityEntry[]>(`/api/community/list?${params}`)
-}
-
-export const getCommunityEntry = (id: string) =>
-  request<CommunityEntry & { boxes: Record<string, any>[] }>(`/api/community/${id}`)
-
-export const getCommunityStats = () =>
-  request<CommunityStats>('/api/community/stats')
-
-export const communityExportUrl = (id: string, format: 'json' | 'csv') =>
-  `${BASE}/api/community/${id}/export?format=${format}`
 
 // Projects
 export const listProjects = () => request<Project[]>('/api/projects')

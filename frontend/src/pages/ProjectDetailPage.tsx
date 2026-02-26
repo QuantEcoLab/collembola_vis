@@ -110,6 +110,8 @@ export default function ProjectDetailPage() {
   const [editDesc, setEditDesc] = useState('')
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmBulkRemove, setConfirmBulkRemove] = useState(false)
 
   // Feature 2 — filter
   const [filter, setFilter] = useState<Filter>('all')
@@ -196,6 +198,7 @@ export default function ProjectDetailPage() {
   const toggleSelectMode = () => {
     setSelectMode((v) => !v)
     setSelectedIds(new Set())
+    setConfirmBulkRemove(false)
   }
 
   const toggleSelect = (imageId: string) => {
@@ -209,8 +212,8 @@ export default function ProjectDetailPage() {
 
   const handleBulkRemove = async () => {
     if (!projectId || selectedIds.size === 0) return
-    if (!window.confirm(`Remove ${selectedIds.size} image${selectedIds.size > 1 ? 's' : ''} from the project?`)) return
     setBulkRemoving(true)
+    setConfirmBulkRemove(false)
     try {
       await Promise.all([...selectedIds].map((id) => removeImageFromProject(projectId, id)))
       setSelectedIds(new Set())
@@ -253,12 +256,8 @@ export default function ProjectDetailPage() {
       const info = await getImage(img.image_id)
       setCurrentProject(projectId!, project!.name)
       workspaceStore.setImage(info)
-      if (img.detection_job_id) {
-        workspaceStore.setDetectionJobId(img.detection_job_id)
-      } else {
-        workspaceStore.setDetectionJobId(null)
-      }
-      workspaceStore.setMeasureJobId(null)
+      workspaceStore.setDetectionJobId(img.detection_job_id ?? null)
+      workspaceStore.setMeasureJobId(img.measurement_job_id ?? null)
       navigate('/workspace')
     } catch {
       // ignore
@@ -280,8 +279,9 @@ export default function ProjectDetailPage() {
   }
 
   const handleDelete = async () => {
-    if (!projectId || !window.confirm(`Delete project "${project?.name}"? This cannot be undone.`)) return
+    if (!projectId) return
     setDeleting(true)
+    setConfirmDelete(false)
     try {
       await deleteProject(projectId)
       navigate('/projects')
@@ -414,7 +414,7 @@ export default function ProjectDetailPage() {
                   </p>
                 </div>
                 {isOwner && (
-                  <div className="flex gap-2 shrink-0">
+                  <div className="flex gap-2 shrink-0 items-center">
                     <button
                       onClick={() => {
                         setEditName(project.name)
@@ -425,13 +425,31 @@ export default function ProjectDetailPage() {
                     >
                       Edit
                     </button>
-                    <button
-                      onClick={handleDelete}
-                      disabled={deleting}
-                      className="text-xs px-3 py-1.5 border border-red-200 rounded-lg text-red-600 hover:bg-red-50 disabled:opacity-50"
-                    >
-                      {deleting ? 'Deleting…' : 'Delete'}
-                    </button>
+                    {confirmDelete ? (
+                      <>
+                        <span className="text-xs text-red-600 font-medium">Delete project?</span>
+                        <button
+                          onClick={handleDelete}
+                          disabled={deleting}
+                          className="text-xs px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                        >
+                          {deleting ? 'Deleting…' : 'Yes, delete'}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(false)}
+                          className="text-xs px-3 py-1.5 text-gray-500 hover:text-gray-700"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmDelete(true)}
+                        className="text-xs px-3 py-1.5 border border-red-200 rounded-lg text-red-600 hover:bg-red-50"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -469,16 +487,36 @@ export default function ProjectDetailPage() {
                 )}
 
                 {selectedIds.size > 0 && (
-                  <button
-                    onClick={handleBulkRemove}
-                    disabled={bulkRemoving}
-                    className="flex items-center gap-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
-                  >
-                    {bulkRemoving
-                      ? <><Loader2 size={13} className="animate-spin" /> Removing…</>
-                      : <><Trash2 size={13} /> Remove {selectedIds.size} image{selectedIds.size > 1 ? 's' : ''}</>
-                    }
-                  </button>
+                  confirmBulkRemove ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-red-600 font-medium">
+                        Remove {selectedIds.size} image{selectedIds.size > 1 ? 's' : ''}?
+                      </span>
+                      <button
+                        onClick={handleBulkRemove}
+                        disabled={bulkRemoving}
+                        className="flex items-center gap-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
+                      >
+                        {bulkRemoving
+                          ? <><Loader2 size={13} className="animate-spin" /> Removing…</>
+                          : <><Trash2 size={13} /> Confirm</>
+                        }
+                      </button>
+                      <button
+                        onClick={() => setConfirmBulkRemove(false)}
+                        className="text-sm text-gray-500 hover:text-gray-700 px-2"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmBulkRemove(true)}
+                      className="flex items-center gap-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg px-3 py-1.5 font-medium transition-colors"
+                    >
+                      <Trash2 size={13} /> Remove {selectedIds.size} image{selectedIds.size > 1 ? 's' : ''}
+                    </button>
+                  )
                 )}
               </>
             ) : (

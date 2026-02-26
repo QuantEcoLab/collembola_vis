@@ -21,7 +21,6 @@ import { useJobProgress } from '../hooks/useJob'
 import { useRefinement } from '../hooks/useRefinement'
 import { useCalibrationStore } from '../store/calibrationStore'
 import { useAuthStore } from '../store/authStore'
-import { useCommunityLoadStore } from '../store/communityLoadStore'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { useProjectStore } from '../store/projectStore'
 import type { ImageInfo } from '../api/types'
@@ -32,7 +31,6 @@ export default function WorkspacePage() {
   const role = useAuthStore((s) => s.role)
   const storedUm = useCalibrationStore((s) => s.umPerPixel)
   const setCalibrationStore = useCalibrationStore((s) => s.setCalibration)
-  const communityLoad = useCommunityLoadStore()
   const workspaceStore = useWorkspaceStore()
   const { currentProjectId, currentProjectName } = useProjectStore()
 
@@ -283,7 +281,6 @@ export default function WorkspacePage() {
     setRefineMode(false)
     setDrawMode(false)
     setRefineSaveError(null)
-    communityLoad.clear()
   }
 
   const handleSaveAnnotations = async () => {
@@ -348,18 +345,6 @@ export default function WorkspacePage() {
         /* ── Empty state ── */
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="w-full max-w-lg space-y-4">
-            {communityLoad.numDetections > 0 && (
-              <div className="rounded-lg bg-teal-50 border border-teal-200 p-4 text-center space-y-1">
-                <p className="text-sm font-medium text-teal-800">
-                  📦 {communityLoad.numDetections} boxes ready from community
-                </p>
-                <p className="text-xs text-teal-600">
-                  by <span className="font-medium">{communityLoad.submittedBy}</span>
-                  {' · '}{communityLoad.imageName}
-                </p>
-                <p className="text-xs text-teal-500">Upload the same image below to view them overlaid.</p>
-              </div>
-            )}
             <div className="text-center">
               <h2 className="text-xl font-semibold text-gray-900">Load an image to get started</h2>
               <p className="text-sm text-gray-500 mt-1">
@@ -391,41 +376,6 @@ export default function WorkspacePage() {
                   <RefreshCw size={11} /> Load different image
                 </button>
               </section>
-
-              {/* Community load banner */}
-              {communityLoad.numDetections > 0 && (
-                <>
-                  <Divider />
-                  <section className="rounded-lg bg-teal-50 border border-teal-200 p-3 space-y-2">
-                    <p className="text-xs font-medium text-teal-800">
-                      📦 {communityLoad.numDetections} boxes from{' '}
-                      <span className="font-semibold">{communityLoad.submittedBy}</span>
-                    </p>
-                    <p className="text-xs text-teal-600 truncate" title={communityLoad.imageName}>
-                      {communityLoad.imageName}
-                    </p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          refinement.loadBoxes(communityLoad.boxes)
-                          communityLoad.clear()
-                          setRefineMode(true)
-                          setDrawMode(false)
-                        }}
-                        className="flex-1 py-1.5 bg-teal-600 text-white rounded-md text-xs font-medium hover:bg-teal-700 transition-colors"
-                      >
-                        Apply boxes
-                      </button>
-                      <button
-                        onClick={communityLoad.clear}
-                        className="py-1.5 px-2 text-xs text-teal-600 hover:text-teal-800"
-                      >
-                        Dismiss
-                      </button>
-                    </div>
-                  </section>
-                </>
-              )}
 
               <Divider />
 

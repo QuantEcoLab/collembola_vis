@@ -54,24 +54,6 @@ export interface AnnotationFile {
   boxes: AnnotatedBox[]
 }
 
-export interface CommunityEntry {
-  id: string
-  username: string
-  submitted_at: string
-  image_name: string
-  image_width: number | null
-  image_height: number | null
-  num_detections: number
-  um_per_pixel: number | null
-  conf_threshold: number | null
-}
-
-export interface CommunityStats {
-  total_submissions: number
-  total_detections: number
-  total_users: number
-  total_images: number
-}
 
 export interface ModelInfo {
   name: string
