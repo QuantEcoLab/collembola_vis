@@ -40,43 +40,47 @@ except ImportError:
     sys.exit(1)
 
 
-def load_sam_predictor(checkpoint_path: str = "checkpoints/sam_vit_b.pth", 
+def _normalize_device(device: str) -> str:
+    """Normalize a device string for PyTorch/SAM.
+
+    Converts YOLO-style numeric strings ("0", "1") to "cuda:N".
+    Passes through "cuda", "cpu", and "cuda:N" unchanged.
+    """
+    if device.isdigit():
+        return f"cuda:{device}"
+    return device
+
+
+def load_sam_predictor(checkpoint_path: str = "checkpoints/sam_vit_b.pth",
                        model_type: str = "vit_b",
                        device: str = "cuda") -> SamPredictor:
     """Load SAM model for mask prediction."""
-    print(f"Loading SAM model from {checkpoint_path}...")
+    device = _normalize_device(device)
+    print(f"Loading SAM model from {checkpoint_path} on {device}...")
     sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
     sam.to(device)
     predictor = SamPredictor(sam)
     return predictor
 
 
-def segment_organism_sam(predictor: SamPredictor, 
-                          image: np.ndarray,
+def segment_organism_sam(predictor: SamPredictor,
                           bbox: List[float]) -> np.ndarray:
-    """
-    Segment organism using SAM with bbox prompt.
-    
+    """Segment organism using SAM with bbox prompt.
+
+    Assumes predictor.set_image() has already been called on the full image.
+
     Args:
-        predictor: SAM predictor
-        image: Full image as numpy array (H, W, 3)
+        predictor: SAM predictor with image already set
         bbox: Bounding box [x1, y1, x2, y2]
-    
+
     Returns:
         Binary mask (H, W) of the organism
     """
-    predictor.set_image(image)
-    
-    # Convert bbox to SAM format [x1, y1, x2, y2]
     input_box = np.array(bbox)
-    
-    # Predict mask
     masks, scores, _ = predictor.predict(
         box=input_box,
-        multimask_output=False
+        multimask_output=False,
     )
-    
-    # Return best mask
     return masks[0]
 
 
@@ -206,13 +210,15 @@ def measure_organisms(image_path: Path,
     df_det = pd.read_csv(detections_csv)
     print(f"Found {len(df_det)} detections")
     
-    # Load SAM
+    # Load SAM and encode the image once (expensive ViT forward pass)
     predictor = load_sam_predictor(sam_checkpoint, device=device)
-    
+    print("Encoding image with SAM (this runs once)...")
+    predictor.set_image(img_array)
+
     # Process each detection
     print(f"\nMeasuring organisms...")
     measurements = []
-    
+
     total = len(df_det)
     for idx, row in tqdm(df_det.iterrows(), total=total, desc="Processing"):
         bbox = [row['x1'], row['y1'], row['x2'], row['y2']]
@@ -221,8 +227,8 @@ def measure_organisms(image_path: Path,
             progress_callback(idx / total, f"Organism {idx + 1}/{total}")
 
         try:
-            # Segment organism with SAM
-            mask = segment_organism_sam(predictor, img_array, bbox)
+            # Segment organism with SAM (image already encoded)
+            mask = segment_organism_sam(predictor, bbox)
             
             # Measure from mask
             meas = measure_organism_from_mask(mask, um_per_pixel, bbox)

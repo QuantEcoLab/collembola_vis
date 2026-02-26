@@ -34,14 +34,15 @@ def run_measurement(job: Job, progress_callback) -> dict[str, Any]:
     um_per_pixel = params["um_per_pixel"]
 
     if method == "sam":
-        from scripts.measure_organisms import measure_organisms
+        from scripts.measure_organisms import measure_organisms, _normalize_device
 
+        sam_device = _normalize_device(params.get("device", "cuda"))
         df = measure_organisms(
             image_path=image_path,
             detections_csv=detections_csv,
             output_csv=output_csv,
             um_per_pixel=um_per_pixel,
-            device=params.get("device", "cuda"),
+            device=sam_device,
             progress_callback=progress_callback,
         )
     else:
