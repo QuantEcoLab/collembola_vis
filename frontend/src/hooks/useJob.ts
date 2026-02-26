@@ -68,7 +68,9 @@ export function useJobProgress(jobId: string | null): Job | undefined {
     }
 
     ws.onclose = () => {
-      if (!wsConnected.current) startPoll()
+      // Always fall back to polling on close — handles both initial failure
+      // and mid-run disconnection (e.g. long SAM jobs that outlast the WS timeout).
+      startPoll()
     }
 
     return () => {
