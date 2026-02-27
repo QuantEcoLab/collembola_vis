@@ -923,22 +923,25 @@ export default function WorkspacePage() {
               <div style={{ height: `${splitPercent}%` }} className="relative overflow-hidden">
                 <ImageViewer
                   src={viewerSrc}
+                  alt={image.filename}
+                  className="h-full"
                   onImageClick={handleImageClick}
+                  transformOverlay={showBboxOverlay && refineMode ? (
+                    <BboxOverlay
+                      boxes={refinement.boxes}
+                      imageWidth={image.width}
+                      imageHeight={image.height}
+                      selectedId={refinement.selectedId}
+                      onBoxClick={refinement.selectBox}
+                      drawingBox={refinement.drawingBox}
+                      mode={drawMode ? 'draw' : 'review'}
+                      onDrawStart={refinement.startDraw}
+                      onDrawMove={refinement.updateDraw}
+                      onDrawEnd={refinement.commitDraw}
+                    />
+                  ) : undefined}
+                  disablePan={refineMode && drawMode}
                 />
-                {showBboxOverlay && refineMode && (
-                  <BboxOverlay
-                    boxes={refinement.boxes}
-                    imageWidth={image.width}
-                    imageHeight={image.height}
-                    selectedId={refinement.selectedId}
-                    onBoxClick={refinement.selectBox}
-                    drawingBox={refinement.drawingBox}
-                    mode={drawMode ? 'draw' : 'review'}
-                    onDrawStart={refinement.startDraw}
-                    onDrawMove={refinement.updateDraw}
-                    onDrawEnd={refinement.commitDraw}
-                  />
-                )}
               </div>
 
               {/* Split handle */}
