@@ -942,6 +942,51 @@ export default function WorkspacePage() {
                   ) : undefined}
                   disablePan={refineMode && drawMode}
                 />
+
+                {/* Floating toolbar for edit mode */}
+                {refineMode && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-0.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5">
+                    {(['review', 'draw'] as const).map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => {
+                          setDrawMode(m === 'draw')
+                          refinement.selectBox(null)
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
+                          (m === 'draw') === drawMode
+                            ? 'bg-amber-500 text-white'
+                            : 'text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        <span>{m === 'review' ? 'Select' : 'Draw'}</span>
+                        <kbd className={`text-[9px] px-1 py-0.5 rounded border font-mono ${
+                          (m === 'draw') === drawMode
+                            ? 'border-amber-300 bg-amber-400/40'
+                            : 'border-gray-200 bg-gray-50 text-gray-400'
+                        }`}>
+                          {m === 'review' ? 'S' : 'D'}
+                        </kbd>
+                      </button>
+                    ))}
+
+                    <div className="border-t border-gray-200 my-0.5" />
+
+                    <button
+                      onClick={() => setOverlayMode((prev) => prev === 'raw' ? 'boxes' : 'raw')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
+                        overlayMode === 'boxes' || overlayMode === 'both'
+                          ? 'text-gray-600 hover:bg-gray-100'
+                          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                      }`}
+                    >
+                      <span>{overlayMode === 'boxes' || overlayMode === 'both' ? 'Hide' : 'Show'}</span>
+                      <kbd className="text-[9px] px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-400 font-mono">
+                        H
+                      </kbd>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Split handle */}
