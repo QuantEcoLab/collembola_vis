@@ -122,8 +122,9 @@ export default function ProjectDetailPage() {
   // Feature 5 — batch measure
   const [measureBatchJobId, setMeasureBatchJobId] = useState<string | null>(null)
   const [measureBatchError, setMeasureBatchError] = useState<string | null>(null)
-  const [showMeasureOptions, setShowMeasureOptions] = useState(false)
-  const [measureUmPerPixel, setMeasureUmPerPixel] = useState<string>('')
+  const [showProcessOptions, setShowProcessOptions] = useState(false)
+  const [processUmPerPixel, setProcessUmPerPixel] = useState<string>('')
+  const [autoMeasureAfterDetect, setAutoMeasureAfterDetect] = useState(false)
 
   const batchJob = useJobProgress(batchJobId)
   const measureBatchJob = useJobProgress(measureBatchJobId)
@@ -144,17 +145,28 @@ export default function ProjectDetailPage() {
 
   // Prefill um/px from calibration store when options open
   useEffect(() => {
-    if (showMeasureOptions && !measureUmPerPixel && calibrationUmPerPixel) {
-      setMeasureUmPerPixel(String(calibrationUmPerPixel))
+    if (showProcessOptions && !processUmPerPixel && calibrationUmPerPixel) {
+      setProcessUmPerPixel(String(calibrationUmPerPixel))
     }
-  }, [showMeasureOptions, calibrationUmPerPixel, measureUmPerPixel])
+  }, [showProcessOptions, calibrationUmPerPixel, processUmPerPixel])
 
-  // Refresh project after batch detect completes
+  // Refresh project after batch detect completes + auto-trigger measurement
   useEffect(() => {
-    if (batchJob?.status === 'completed') {
-      load()
+    if (batchJob?.status !== 'completed') return
+    load()
+    
+    // Auto-trigger measurement if this was a "Process All" operation
+    if (autoMeasureAfterDetect && projectId) {
+      setAutoMeasureAfterDetect(false)
+      const umVal = parseFloat(processUmPerPixel)
+      if (umVal && umVal > 0) {
+        setMeasureBatchError(null)
+        runBatchMeasurement(projectId, { um_per_pixel: umVal })
+          .then((res) => setMeasureBatchJobId(res.job_id))
+          .catch((e) => setMeasureBatchError(e.message))
+      }
     }
-  }, [batchJob?.status, load])
+  }, [batchJob?.status, load, autoMeasureAfterDetect, projectId, processUmPerPixel])
 
   // Refresh project after batch measure completes
   useEffect(() => {
@@ -226,28 +238,22 @@ export default function ProjectDetailPage() {
     }
   }
 
-  const handleBatchDetect = async () => {
+  const handleProcessAll = async () => {
     if (!projectId) return
+    const umVal = parseFloat(processUmPerPixel)
+    if (!umVal || umVal <= 0) return
+    
     setBatchError(null)
+    setMeasureBatchError(null)
+    setShowProcessOptions(false)
+    setAutoMeasureAfterDetect(true)
+    
     try {
       const res = await runBatchDetection(projectId, {})
       setBatchJobId(res.job_id)
     } catch (e: any) {
       setBatchError(e.message)
-    }
-  }
-
-  const handleBatchMeasure = async () => {
-    if (!projectId) return
-    const umVal = parseFloat(measureUmPerPixel)
-    if (!umVal || umVal <= 0) return
-    setMeasureBatchError(null)
-    setShowMeasureOptions(false)
-    try {
-      const res = await runBatchMeasurement(projectId, { um_per_pixel: umVal })
-      setMeasureBatchJobId(res.job_id)
-    } catch (e: any) {
-      setMeasureBatchError(e.message)
+      setAutoMeasureAfterDetect(false)
     }
   }
 
@@ -308,9 +314,6 @@ export default function ProjectDetailPage() {
     'annotated': allImages.filter((i) => i.has_annotation).length,
     'done': allImages.filter((i) => i.has_annotation && !!i.measurement_job_id).length,
   }
-
-  // Feature 5 — measurable check
-  const measurableCount = allImages.filter((i) => i.detection_job_id || i.has_annotation).length
 
   if (loading) {
     return (
@@ -532,24 +535,13 @@ export default function ProjectDetailPage() {
                 {project.images.length > 0 && (
                   <>
                     <button
-                      onClick={handleBatchDetect}
-                      disabled={batchJob?.status === 'running' || batchJob?.status === 'pending'}
+                      onClick={() => setShowProcessOptions((v) => !v)}
+                      disabled={batchJob?.status === 'running' || batchJob?.status === 'pending' || measureBatchJob?.status === 'running' || measureBatchJob?.status === 'pending'}
                       className="flex items-center gap-1.5 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
                     >
                       <Play size={13} />
-                      Run Detection on All
+                      Process All
                     </button>
-
-                    {measurableCount > 0 && (
-                      <button
-                        onClick={() => setShowMeasureOptions((v) => !v)}
-                        disabled={measureBatchJob?.status === 'running' || measureBatchJob?.status === 'pending'}
-                        className="flex items-center gap-1.5 text-sm bg-teal-600 hover:bg-teal-700 text-white rounded-lg px-3 py-1.5 font-medium disabled:opacity-50 transition-colors"
-                      >
-                        <Ruler size={13} />
-                        Measure All
-                      </button>
-                    )}
 
                     <button
                       onClick={toggleSelectMode}
@@ -564,34 +556,36 @@ export default function ProjectDetailPage() {
             )}
           </div>
 
-          {/* Measure options inline row */}
-          {showMeasureOptions && (
-            <div className="flex items-center gap-3 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3">
-              <Ruler size={14} className="text-teal-600 shrink-0" />
-              <span className="text-sm text-teal-800 font-medium shrink-0">µm/px:</span>
+          {/* Process options inline row */}
+          {showProcessOptions && (
+            <div className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+              <Ruler size={14} className="text-blue-600 shrink-0" />
+              <span className="text-sm text-blue-800 font-medium shrink-0">Calibration (µm/px):</span>
               <input
                 type="number"
                 step="0.01"
                 min="0.01"
-                value={measureUmPerPixel}
-                onChange={(e) => setMeasureUmPerPixel(e.target.value)}
+                value={processUmPerPixel}
+                onChange={(e) => setProcessUmPerPixel(e.target.value)}
                 placeholder="e.g. 8.57"
-                className="w-28 text-sm border border-teal-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-teal-400 bg-white"
+                className="w-28 text-sm border border-blue-300 rounded-md px-2 py-1 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
               />
               <button
-                onClick={handleBatchMeasure}
-                disabled={!parseFloat(measureUmPerPixel)}
-                className="text-sm bg-teal-600 hover:bg-teal-700 text-white rounded-md px-3 py-1 font-medium disabled:opacity-40 transition-colors"
+                onClick={handleProcessAll}
+                disabled={!parseFloat(processUmPerPixel)}
+                className="text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-1 font-medium disabled:opacity-40 transition-colors"
               >
-                Confirm
+                Start Processing
               </button>
               <button
-                onClick={() => setShowMeasureOptions(false)}
+                onClick={() => setShowProcessOptions(false)}
                 className="text-gray-400 hover:text-gray-600 ml-1"
               >
                 <X size={14} />
               </button>
-              <span className="text-xs text-teal-600 ml-auto">{measurableCount} image{measurableCount !== 1 ? 's' : ''} will be measured</span>
+              <span className="text-xs text-blue-600 ml-auto">
+                Detect → Measure {project.images.length} image{project.images.length !== 1 ? 's' : ''}
+              </span>
             </div>
           )}
 

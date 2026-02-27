@@ -37,7 +37,7 @@ def run_measurement(job: Job, progress_callback) -> dict[str, Any]:
         from scripts.measure_organisms import measure_organisms, _normalize_device
 
         sam_device = _normalize_device(params.get("device", "cuda"))
-        df = measure_organisms(
+        df, overlay_path = measure_organisms(
             image_path=image_path,
             detections_csv=detections_csv,
             output_csv=output_csv,
@@ -56,11 +56,17 @@ def run_measurement(job: Job, progress_callback) -> dict[str, Any]:
             progress_callback=progress_callback,
         )
 
-    return {
+    result: dict = {
         "num_organisms": len(df),
         "csv_path": str(output_csv),
         "method": method,
         "image_path": str(image_path),
+        "image_stem": image_path.stem,
+    }
+    if method == "sam" and overlay_path is not None:
+        result["overlay_path"] = str(overlay_path)
+
+    result.update({
         "summary": {
             col: {
                 "mean": round(float(df[col].mean()), 4),
@@ -71,4 +77,6 @@ def run_measurement(job: Job, progress_callback) -> dict[str, Any]:
             for col in df.select_dtypes(include="number").columns
             if col not in ("detection_id", "class")
         },
-    }
+    })
+
+    return result

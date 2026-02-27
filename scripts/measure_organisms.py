@@ -24,12 +24,12 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
+import cv2
 import numpy as np
 import pandas as pd
-from PIL import Image, ImageDraw
+from PIL import Image
 from tqdm import tqdm
 from skimage.measure import regionprops
-from skimage.transform import rotate
 
 # SAM imports
 try:
@@ -215,6 +215,9 @@ def measure_organisms(image_path: Path,
     print("Encoding image with SAM (this runs once)...")
     predictor.set_image(img_array)
 
+    # Prepare overlay canvas (BGR for cv2 drawing)
+    overlay_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR) if save_visualization else None
+
     # Process each detection
     print(f"\nMeasuring organisms...")
     measurements = []
@@ -229,10 +232,10 @@ def measure_organisms(image_path: Path,
         try:
             # Segment organism with SAM (image already encoded)
             mask = segment_organism_sam(predictor, bbox)
-            
+
             # Measure from mask
             meas = measure_organism_from_mask(mask, um_per_pixel, bbox)
-            
+
             # Add detection info
             meas['detection_id'] = int(idx)
             meas['bbox_x1'] = row['x1']
@@ -243,9 +246,20 @@ def measure_organisms(image_path: Path,
             meas['bbox_height_px'] = row['height']
             meas['confidence'] = row['confidence']
             meas['class'] = row['class']
-            
+
             measurements.append(meas)
-            
+
+            # Draw contour on overlay
+            if save_visualization and overlay_bgr is not None:
+                mask_u8 = mask.astype(np.uint8) * 255
+                contours_cv, _ = cv2.findContours(mask_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                cv2.drawContours(overlay_bgr, contours_cv, -1, (0, 220, 80), 2)
+                # Label with detection index at centroid
+                cx = int(meas['centroid_x_px'])
+                cy = int(meas['centroid_y_px'])
+                cv2.putText(overlay_bgr, str(int(idx)), (cx + 4, cy - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 220, 80), 2, cv2.LINE_AA)
+
         except Exception as e:
             print(f"\nWarning: Failed to measure detection {idx}: {e}")
             print(f"Bbox: {bbox}")
@@ -276,6 +290,13 @@ def measure_organisms(image_path: Path,
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     df_meas.to_csv(output_csv, index=False)
     print(f"\n✓ Saved measurements to: {output_csv}")
+
+    # Save contour overlay
+    overlay_path = None
+    if save_visualization and overlay_bgr is not None:
+        overlay_path = output_csv.parent / f"{image_path.stem}_sam_overlay.jpg"
+        cv2.imwrite(str(overlay_path), overlay_bgr, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        print(f"✓ Saved SAM overlay to: {overlay_path}")
     
     # Print summary statistics
     print(f"\n{'='*70}")
@@ -314,7 +335,7 @@ def measure_organisms(image_path: Path,
         json.dump(metadata, f, indent=2)
     print(f"\n✓ Saved metadata to: {metadata_path}")
     
-    return df_meas
+    return df_meas, overlay_path
 
 
 def main():

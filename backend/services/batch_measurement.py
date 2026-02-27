@@ -90,10 +90,11 @@ def run_batch_measurement(job: Job, progress_callback) -> dict[str, Any]:
             output_dir.mkdir(parents=True, exist_ok=True)
             output_csv = output_dir / f"{image_stem}_measurements.csv"
 
+            sam_overlay_path = None
             if method == "sam":
                 from scripts.measure_organisms import measure_organisms, _normalize_device
                 sam_device = _normalize_device(params.get("device", "cuda"))
-                df = measure_organisms(
+                df, sam_overlay_path = measure_organisms(
                     image_path=image_path,
                     detections_csv=detections_csv,
                     output_csv=output_csv,
@@ -111,6 +112,15 @@ def run_batch_measurement(job: Job, progress_callback) -> dict[str, Any]:
                 )
 
             # Register as a completed MEASUREMENT job so workspace can load it
+            sub_result: dict[str, Any] = {
+                "num_organisms": len(df),
+                "csv_path": str(output_csv),
+                "method": method,
+                "image_path": str(image_path),
+                "image_stem": image_path.stem,
+            }
+            if method == "sam" and sam_overlay_path is not None:
+                sub_result["overlay_path"] = str(sam_overlay_path)
             sub_job = job_manager.register_completed(
                 JobType.MEASUREMENT,
                 params={
@@ -119,12 +129,7 @@ def run_batch_measurement(job: Job, progress_callback) -> dict[str, Any]:
                     "um_per_pixel": um_per_pixel,
                     "method": method,
                 },
-                result={
-                    "num_organisms": len(df),
-                    "csv_path": str(output_csv),
-                    "method": method,
-                    "image_path": str(image_path),
-                },
+                result=sub_result,
             )
 
             db_projects.set_measurement_job(project_id, image_id, sub_job.id)

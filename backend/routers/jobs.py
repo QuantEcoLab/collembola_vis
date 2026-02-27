@@ -21,3 +21,9 @@ async def get_job(job_id: str):
     if job is None:
         raise HTTPException(404, "Job not found")
     return job.to_dict()
+
+
+@router.get("/queue/stats")
+async def get_queue_stats():
+    """Get job queue statistics (workers, running, pending, completed, failed)."""
+    return job_manager.get_stats()

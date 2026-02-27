@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { LogOut, Download, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react'
+import { LogOut, Download, RefreshCw, ChevronDown, ChevronRight, ChevronLeft } from 'lucide-react'
 import ImageUploader from '../components/ImageUploader'
 import ImageViewer from '../components/ImageViewer'
 import BboxOverlay from '../components/BboxOverlay'
@@ -29,8 +29,7 @@ export default function WorkspacePage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
   const role = useAuthStore((s) => s.role)
-  const storedUm = useCalibrationStore((s) => s.umPerPixel)
-  const setCalibrationStore = useCalibrationStore((s) => s.setCalibration)
+  const calStore = useCalibrationStore()
   const workspaceStore = useWorkspaceStore()
   const { currentProjectId, currentProjectName } = useProjectStore()
 
@@ -42,11 +41,15 @@ export default function WorkspacePage() {
   }
 
   // ── Calibration ────────────────────────────────────────────────────
-  const [umPerPixel, setUmPerPixel] = useState<number>(storedUm ?? 8.57)
-  const [rulerMm, setRulerMm] = useState(10)
+  const [umPerPixel, setUmPerPixelState] = useState<number>(calStore.umPerPixel ?? 8.57)
+  const setUmPerPixel = (v: number) => {
+    setUmPerPixelState(v)
+    calStore.setUmManual(v)
+  }
+  const rulerMm = calStore.rulerMm
+  const setRulerMm = calStore.setRulerMm
   const [calibrating, setCalibrating] = useState(false)
   const [calibrateError, setCalibrateError] = useState<string | null>(null)
-  // Manual click calibration: collect two points in image coordinates
   const [calMode, setCalMode] = useState(false)
   const [calPoints, setCalPoints] = useState<[number, number][]>([])
 
@@ -73,20 +76,8 @@ export default function WorkspacePage() {
   const [selectedModel, setSelectedModel] = useState<string | undefined>()
   const refinement = useRefinement(
     image?.image_id ?? null,
-    // Pass detectionJobId always so annotations can be auto-restored even when
-    // the detection job is no longer in memory (e.g. after server restart).
-    // useRefinement only falls through to getDetectionBoxes when the job is set.
     detectionDone ? detectionJobId : null,
   )
-
-  // Auto-enter refine mode whenever saved annotations are restored so boxes are
-  // immediately visible (whether detection job is in memory or not).
-  useEffect(() => {
-    if (refinement.annotationsSaved && !refineMode) {
-      setRefineMode(true)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refinement.annotationsSaved])
 
   // ── Measurement ────────────────────────────────────────────────────
   const [measureMethod, setMeasureMethod] = useState<'fast' | 'sam'>('fast')
@@ -98,10 +89,43 @@ export default function WorkspacePage() {
   const [measureError, setMeasureError] = useState<string | null>(null)
   const measureJob = useJobProgress(measureJobId)
   const [csvData, setCsvData] = useState<Record<string, any>[] | null>(null)
-
   const measurementDone = measureJob?.status === 'completed'
 
-  // Index of selected box within original (non-added) boxes → maps to measurement CSV row
+  // ── View state ─────────────────────────────────────────────────────
+  const [showContours, setShowContours] = useState(false)
+  const [splitPercent, setSplitPercent] = useState(58)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const mainAreaRef = useRef<HTMLDivElement>(null)
+
+  // ── Derived ────────────────────────────────────────────────────────
+  const hasSamOverlay = measurementDone && !!measureJob?.result?.overlay_path
+  const samOverlayUrl = hasSamOverlay
+    ? outputFileUrl(measureJob!.id, measureJob!.result.overlay_path.split('/').pop()!)
+    : null
+
+  // Always show raw image; showContours swaps in the SAM overlay JPEG as the base.
+  // refineMode adds the SVG BboxOverlay on top — works with either base.
+  const viewerSrc = showContours && samOverlayUrl
+    ? samOverlayUrl
+    : image
+    ? imageUrl(image.image_id, image.filename)
+    : ''
+
+  const overlayLabel = showContours
+    ? 'SAM contours'
+    : refineMode
+    ? 'Edit mode'
+    : null
+
+  // Workflow stepper
+  const steps = [
+    { label: 'Scale', done: calStore.umPerPixel != null },
+    { label: 'Detect', done: detectionDone },
+    { label: 'Annotate', done: refinement.annotationsSaved },
+    { label: 'Measure', done: measurementDone },
+  ]
+
+  // Index of selected box within non-added boxes → maps to measurement CSV row
   const selectedMeasurementIndex = useMemo(() => {
     if (!refinement.selectedId) return null
     const box = refinement.boxes.find((b) => b.id === refinement.selectedId)
@@ -111,33 +135,18 @@ export default function WorkspacePage() {
     return idx >= 0 ? idx : null
   }, [refinement.selectedId, refinement.boxes])
 
-  // Keyboard Delete/Backspace removes the selected box when in review mode
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (!refineMode || drawMode) return
-      if (!refinement.selectedId) return
-      const tag = (e.target as HTMLElement).tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        e.preventDefault()
-        const sel = refinement.boxes.find((b) => b.id === refinement.selectedId)
-        if (sel?.status === 'added') refinement.removeBox(refinement.selectedId)
-        else refinement.toggleBox(refinement.selectedId)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [refineMode, drawMode, refinement.selectedId, refinement.removeBox])
+  // ── Effects ────────────────────────────────────────────────────────
 
-  const overlayReady = detectionDone && detectionJob?.result?.image_stem
-  // In refine mode always show the original image (SVG overlay is drawn on top)
-  const viewerSrc = refineMode
-    ? (image ? imageUrl(image.image_id, image.filename) : '')
-    : overlayReady
-    ? outputFileUrl(detectionJob!.id, `${detectionJob!.result.image_stem}_overlay.jpg`)
-    : image
-    ? imageUrl(image.image_id, image.filename)
-    : ''
+  // Auto-enter refine mode when saved annotations are restored
+  useEffect(() => {
+    if (refinement.annotationsSaved && !refineMode) setRefineMode(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refinement.annotationsSaved])
+
+  // Auto-show contours when SAM measurement completes
+  useEffect(() => {
+    if (hasSamOverlay) setShowContours(true)
+  }, [hasSamOverlay])
 
   // Load CSV when measurement completes
   useEffect(() => {
@@ -164,7 +173,7 @@ export default function WorkspacePage() {
     }
   }, [measureJob?.status, measureJob?.result?.csv_path, measureJob?.id])
 
-  // Auto-sync detection/measurement job IDs back to the project when in project context
+  // Auto-sync job IDs to project
   useEffect(() => {
     if (!currentProjectId || !image || !detectionJobId) return
     if (detectionJob?.status !== 'completed') return
@@ -179,6 +188,38 @@ export default function WorkspacePage() {
       .catch(() => {})
   }, [measureJob?.status, measureJobId, currentProjectId, image?.image_id])
 
+  // Unified keyboard handler: Esc, S, D, H, Delete/Backspace
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+
+      if (e.key === 'Escape') {
+        if (calMode) { setCalMode(false); setCalPoints([]); return }
+        if (drawMode) { setDrawMode(false); return }
+        if (refinement.selectedId) { refinement.selectBox(null); return }
+        return
+      }
+
+      if (!refineMode) return
+
+      if (e.key === 's' || e.key === 'S') { setDrawMode(false); refinement.selectBox(null) }
+      if (e.key === 'd' || e.key === 'D') { setDrawMode(true); setShowAnnotations(true) }
+      if (e.key === 'h' || e.key === 'H') { setShowAnnotations((v) => !v) }
+
+      if (!drawMode && refinement.selectedId) {
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault()
+          const sel = refinement.boxes.find((b) => b.id === refinement.selectedId)
+          if (sel?.status === 'added') refinement.removeBox(refinement.selectedId)
+          else refinement.toggleBox(refinement.selectedId)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [calMode, drawMode, refineMode, refinement])
+
   // ── Handlers ───────────────────────────────────────────────────────
 
   const handleAutoCalibrate = async () => {
@@ -188,8 +229,8 @@ export default function WorkspacePage() {
     try {
       const res = await autoCalibrate(image.image_id, rulerMm)
       if (res.um_per_pixel) {
-        setUmPerPixel(res.um_per_pixel)
-        setCalibrationStore(res.um_per_pixel, res.calibration_id!, res.method, res.confidence)
+        setUmPerPixelState(res.um_per_pixel)
+        calStore.setCalibration(res.um_per_pixel, res.calibration_id!, res.method, res.confidence)
       } else {
         setCalibrateError(res.error ?? 'Auto-detect failed — enter value manually')
       }
@@ -200,7 +241,6 @@ export default function WorkspacePage() {
     }
   }
 
-  // Called by ImageViewer when user clicks the image in calMode
   const handleImageClick = (x: number, y: number) => {
     if (!calMode) return
     const next = [...calPoints, [x, y]] as [number, number][]
@@ -220,8 +260,8 @@ export default function WorkspacePage() {
     try {
       const res = await manualCalibrate(image.image_id, p1, p2, rulerMm)
       if (res.um_per_pixel) {
-        setUmPerPixel(Number(res.um_per_pixel.toFixed(4)))
-        setCalibrationStore(res.um_per_pixel, res.calibration_id!, res.method, res.confidence)
+        setUmPerPixelState(Number(res.um_per_pixel.toFixed(4)))
+        calStore.setCalibration(res.um_per_pixel, res.calibration_id!, res.method, res.confidence)
       }
     } catch (e: any) {
       setCalibrateError(e.message)
@@ -281,11 +321,11 @@ export default function WorkspacePage() {
     setRefineMode(false)
     setDrawMode(false)
     setRefineSaveError(null)
+    setShowContours(false)
+    setSplitPercent(58)
   }
 
   const handleSaveAnnotations = async () => {
-    // Use the active detection job, or fall back to the source job ID from
-    // the auto-restored annotation file (e.g. after server restart).
     const effectiveJobId = detectionJobId ?? refinement.restoredSourceJobId
     if (!image || !effectiveJobId) return
     setRefineSaveError(null)
@@ -295,6 +335,37 @@ export default function WorkspacePage() {
       setRefineSaveError(e.message)
     }
   }
+
+  const handleRowClick = useCallback(
+    (rowIndex: number) => {
+      const origBoxes = refinement.boxes.filter((b) => b.status !== 'added')
+      const box = origBoxes[rowIndex]
+      if (!box) return
+      if (!refineMode) {
+        setRefineMode(true)
+        setDrawMode(false)
+      }
+      refinement.selectBox(box.id)
+    },
+    [refinement, refineMode],
+  )
+
+  // Split drag handler — document-level listeners during drag
+  const onSplitPointerDown = useCallback((e: React.PointerEvent) => {
+    e.preventDefault()
+    const onMove = (ev: PointerEvent) => {
+      const rect = mainAreaRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const pct = ((ev.clientY - rect.top) / rect.height) * 100
+      setSplitPercent(Math.max(20, Math.min(80, pct)))
+    }
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove)
+      document.removeEventListener('pointerup', onUp)
+    }
+    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointerup', onUp)
+  }, [])
 
   // ── Render ─────────────────────────────────────────────────────────
 
@@ -308,7 +379,7 @@ export default function WorkspacePage() {
             {currentProjectId && (
               <Link
                 to={`/projects/${currentProjectId}`}
-                className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors flex items-center gap-1"
+                className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
               >
                 ← {currentProjectName ?? 'Project'}
               </Link>
@@ -321,13 +392,13 @@ export default function WorkspacePage() {
             </Link>
             <Link
               to="/workspace"
-              className="text-sm px-3 py-1 rounded-md bg-gray-100 text-gray-900 font-medium transition-colors"
+              className="text-sm px-3 py-1 rounded-md bg-gray-100 text-gray-900 font-medium"
             >
               Workspace
             </Link>
           </nav>
           {image && (
-            <span className="text-xs text-gray-400 truncate max-w-xs hidden sm:block">
+            <span className="text-xs text-gray-400 truncate max-w-xs hidden sm:block" title={image.filename}>
               {image.filename}
             </span>
           )}
@@ -359,416 +430,484 @@ export default function WorkspacePage() {
         <div className="flex flex-1 overflow-hidden">
 
           {/* ── Left panel ── */}
-          <aside className="w-72 shrink-0 bg-white border-r flex flex-col overflow-y-auto">
-            <div className="p-5 space-y-5">
-
-              {/* Image */}
-              <section className="space-y-1">
-                <Label>Image</Label>
-                <p className="text-sm font-medium text-gray-800 truncate">{image.filename}</p>
-                <p className="text-xs text-gray-400">
-                  {image.width.toLocaleString()} × {image.height.toLocaleString()} px
-                </p>
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-0.5"
-                >
-                  <RefreshCw size={11} /> Load different image
-                </button>
-              </section>
-
-              <Divider />
-
-              {/* Scale / Calibration */}
-              <section className="space-y-2">
-                <Label>Scale</Label>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={umPerPixel}
-                    onChange={(e) => setUmPerPixel(Number(e.target.value))}
-                    className="w-24 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    step={0.01}
-                    min={0.01}
-                    disabled={calibrating}
+          {sidebarCollapsed ? (
+            /* Collapsed strip */
+            <aside className="w-10 shrink-0 bg-white border-r flex flex-col items-center pt-3 gap-4">
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100"
+                title="Expand sidebar"
+              >
+                <ChevronRight size={16} />
+              </button>
+              {/* Mini workflow dots */}
+              <div className="flex flex-col gap-1.5 mt-1">
+                {steps.map((s) => (
+                  <div
+                    key={s.label}
+                    className={`w-2.5 h-2.5 rounded-full ${s.done ? 'bg-green-500' : 'bg-gray-200'}`}
+                    title={s.label}
                   />
-                  <span className="text-xs text-gray-500">µm / px</span>
-                </div>
-
-                {/* Ruler length — used by both auto and manual */}
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-gray-500 w-14 shrink-0">Ruler</label>
-                  <input
-                    type="number"
-                    value={rulerMm}
-                    onChange={(e) => setRulerMm(Number(e.target.value))}
-                    className="w-16 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    step={1}
-                    min={0.1}
-                  />
-                  <span className="text-xs text-gray-500">mm</span>
-                </div>
-
-                <div className="flex gap-2 flex-wrap">
-                  <button
-                    onClick={handleAutoCalibrate}
-                    disabled={calibrating}
-                    className="text-xs px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 transition-colors"
-                  >
-                    {calibrating ? 'Detecting…' : 'Auto-detect'}
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setCalPoints([])
-                      setCalMode((v) => !v)
-                      setCalibrateError(null)
-                    }}
-                    className={`text-xs px-2.5 py-1.5 rounded-lg transition-colors ${
-                      calMode
-                        ? 'bg-orange-100 text-orange-700 ring-1 ring-orange-300'
-                        : 'bg-gray-100 hover:bg-gray-200'
-                    }`}
-                  >
-                    {calMode ? 'Cancel' : 'Manual'}
-                  </button>
-                </div>
-
-                {/* Manual calibration guidance */}
-                {calMode && (
-                  <div className="rounded-lg bg-orange-50 border border-orange-200 p-2.5 text-xs text-orange-800 space-y-0.5">
-                    <p className="font-medium">Click two points on the ruler</p>
-                    <p className="text-orange-600">
-                      {calPoints.length === 0
-                        ? 'Click the first point on the image →'
-                        : 'Point 1 captured. Click the second point →'}
-                    </p>
-                  </div>
-                )}
-
-                {calibrateError && (
-                  <p className="text-xs text-amber-600">{calibrateError}</p>
-                )}
-              </section>
-
-              <Divider />
-
-              {/* Detection */}
-              <section className="space-y-3">
-                <Label>Detection</Label>
-
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 w-14 shrink-0">Confidence</span>
-                  <input
-                    type="number"
-                    value={conf}
-                    onChange={(e) => setConf(Number(e.target.value))}
-                    className="w-20 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
-                    step={0.05}
-                    min={0.1}
-                    max={1.0}
-                  />
-                </div>
-
-                {/* Advanced toggle */}
-                <button
-                  onClick={() => setAdvancedOpen((v) => !v)}
-                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
-                >
-                  {advancedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                  Advanced
-                </button>
-
-                {advancedOpen && (
-                  <div className="space-y-2 pl-1">
-                    <Row label="Tile size">
-                      <input
-                        type="number"
-                        value={tileSize}
-                        onChange={(e) => setTileSize(Number(e.target.value))}
-                        className="w-20 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        step={64}
-                        min={256}
-                      />
-                      <span className="text-xs text-gray-400">px</span>
-                    </Row>
-                    <Row label="Overlap">
-                      <input
-                        type="number"
-                        value={overlap}
-                        onChange={(e) => setOverlap(Number(e.target.value))}
-                        className="w-20 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        step={32}
-                        min={0}
-                      />
-                      <span className="text-xs text-gray-400">px</span>
-                    </Row>
-                    <Row label="Device">
-                      <input
-                        type="text"
-                        value={device}
-                        onChange={(e) => setDevice(e.target.value)}
-                        className="w-20 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        placeholder="0 / cpu"
-                      />
-                    </Row>
-                  </div>
-                )}
-
-                {!detectionJob || detectionJob.status === 'failed' ? (
-                  <>
-                    <button
-                      onClick={handleRunDetection}
-                      className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                    >
-                      Run Detection
-                    </button>
-                    {detectionError && (
-                      <p className="text-xs text-red-600">{detectionError}</p>
-                    )}
-                    {detectionJob?.status === 'failed' && detectionJob.error && (
-                      <p className="text-xs text-red-600">{detectionJob.error}</p>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <JobProgress job={detectionJob} />
-                    {detectionDone && (
-                      <button
-                        onClick={() => setDetectionJobId(null)}
-                        className="text-xs text-gray-400 hover:text-gray-600"
-                      >
-                        Re-run with different params
-                      </button>
-                    )}
-                  </>
-                )}
-
-                {detectionDone && (
-                  <p className="text-sm font-medium text-green-700">
-                    ✓ {detectionJob!.result.num_detections} organisms detected
-                  </p>
-                )}
-
-                {/* Edit Detections button */}
-                {detectionDone && !refineMode && (
-                  <button
-                    onClick={() => { setRefineMode(true); setDrawMode(false) }}
-                    className="w-full py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors"
-                  >
-                    Edit Detections
-                  </button>
-                )}
-              </section>
-
-              {/* Refinement panel — shown when refineMode is active */}
-              {refineMode && (
-                <>
-                  <Divider />
-                  <section className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label>Edit Detections</Label>
-                      <button
-                        onClick={() => { setRefineMode(false); setDrawMode(false) }}
-                        className="text-xs text-gray-400 hover:text-gray-600"
-                      >
-                        Exit
-                      </button>
-                    </div>
-
-                    {refinement.isLoading && (
-                      <p className="text-xs text-gray-500">Loading boxes…</p>
-                    )}
-                    {refinement.error && (
-                      <p className="text-xs text-red-600">{refinement.error}</p>
-                    )}
-
-                    {/* Stats */}
-                    {!refinement.isLoading && (
-                      <p className="text-xs text-gray-600">
-                        <span className="text-green-600 font-medium">✓ {refinement.acceptedCount}</span>
-                        {refinement.addedCount > 0 && (
-                          <span className="text-blue-500 font-medium"> · +{refinement.addedCount} drawn</span>
-                        )}
-                        {refinement.rejectedCount > 0 && (
-                          <span className="text-red-500 font-medium"> · ✗ {refinement.rejectedCount} invalid</span>
-                        )}
-                      </p>
-                    )}
-
-                    {/* Save */}
-                    <button
-                      onClick={handleSaveAnnotations}
-                      disabled={refinement.isSaving}
-                      className="w-full py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 disabled:opacity-50 transition-colors"
-                    >
-                      {refinement.isSaving ? 'Saving…' : 'Save Annotations'}
-                    </button>
-                    {refineSaveError && (
-                      <p className="text-xs text-red-600">{refineSaveError}</p>
-                    )}
-                    {refinement.annotationsSaved && (
-                      <p className="text-xs text-green-600">✓ Annotations saved</p>
-                    )}
-
-                    {/* Export links */}
-                    {refinement.annotationsSaved && image && (
-                      <div className="flex gap-2">
-                        <a
-                          href={annotationExportUrl(image.image_id, 'json')}
-                          download
-                          className="flex-1 text-center text-xs py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                          JSON
-                        </a>
-                        <a
-                          href={annotationExportUrl(image.image_id, 'csv')}
-                          download
-                          className="flex-1 text-center text-xs py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
-                        >
-                          CSV
-                        </a>
-                      </div>
-                    )}
-
-                    {/* Fine-tune — admin only, unlocks after annotations saved */}
-                    {role === 'admin' && refinement.annotationsSaved && image && detectionJobId && (
-                      <>
-                        <Divider />
-                        <Label>Fine-tune</Label>
-                        <FineTunePanel
-                          imageId={image.image_id}
-                          onModelSelected={(path) => setSelectedModel(path)}
-                        />
-                        {selectedModel && (
-                          <p className="text-xs text-violet-700 truncate">
-                            Active: {selectedModel.split('/').pop()}
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </section>
-                </>
-              )}
-
-              {/* Project context indicator — shown when in project and detection done */}
-              {detectionDone && currentProjectId && (
-                <>
-                  <Divider />
-                  <section className="space-y-1.5">
-                    <Label>Project</Label>
-                    <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1.5">
-                      ✓ Results saved to{' '}
-                      <Link
-                        to={`/projects/${currentProjectId}`}
-                        className="font-medium hover:underline"
-                      >
-                        {currentProjectName ?? 'project'}
-                      </Link>
-                    </p>
-                  </section>
-                </>
-              )}
-
-              {/* Measurements — unlocks after detection */}
-              {detectionDone && (
-                <>
-                  <Divider />
-                  <section className="space-y-3">
-                    <Label>Measurements</Label>
-
-                    {/* Method toggle */}
-                    <div className="flex gap-1.5">
-                      {(['fast', 'sam'] as const).map((m) => (
-                        <button
-                          key={m}
-                          onClick={() => setMeasureMethod(m)}
-                          className={`flex-1 py-1.5 rounded-lg text-xs border transition-colors ${
-                            measureMethod === m
-                              ? 'bg-blue-50 border-blue-300 text-blue-700 font-medium'
-                              : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                ))}
+              </div>
+            </aside>
+          ) : (
+            /* Full sidebar */
+            <aside className="w-72 shrink-0 bg-white border-r flex flex-col overflow-hidden">
+              {/* Workflow stepper */}
+              <div className="shrink-0 px-4 pt-3 pb-2 border-b bg-gray-50/60">
+                <div className="flex items-center">
+                  {steps.map((step, i) => (
+                    <div key={step.label} className="flex items-center" style={{ flex: i < steps.length - 1 ? '1' : 'none' }}>
+                      <div className="flex flex-col items-center">
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                            step.done ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'
                           }`}
                         >
-                          {m === 'fast' ? 'Fast (ellipse)' : 'Accurate (SAM)'}
-                        </button>
-                      ))}
+                          {step.done ? '✓' : i + 1}
+                        </div>
+                        <span className="text-[10px] text-gray-400 mt-0.5 whitespace-nowrap">{step.label}</span>
+                      </div>
+                      {i < steps.length - 1 && (
+                        <div
+                          className={`flex-1 h-px mb-3.5 mx-1 ${step.done ? 'bg-green-300' : 'bg-gray-200'}`}
+                        />
+                      )}
                     </div>
-                    {measureMethod === 'sam' && (
-                      <p className="text-xs text-amber-600">
-                        SAM is ~1 org/sec — may take several minutes for large samples.
-                      </p>
-                    )}
-                    {refinement.annotationsSaved ? (
-                      <p className="text-xs text-teal-700 bg-teal-50 rounded px-2 py-1.5">
-                        ✓ Using your edited detections (kept + added boxes)
-                      </p>
-                    ) : refinement.boxes.some((b) => b.status !== 'accepted') && (
-                      <p className="text-xs text-amber-600">
-                        Save annotations first to include your edits in measurements.
-                      </p>
-                    )}
+                  ))}
+                  <button
+                    onClick={() => setSidebarCollapsed(true)}
+                    className="ml-auto text-gray-300 hover:text-gray-500 p-1 rounded hover:bg-gray-100 mb-3.5"
+                    title="Collapse sidebar"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                </div>
+              </div>
 
-                    {!measureJob || measureJob.status === 'failed' ? (
-                      <>
+              {/* Scrollable content */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-5">
+
+                {/* Image */}
+                <section className="space-y-1">
+                  <Label>Image</Label>
+                  <p className="text-sm font-medium text-gray-800 truncate" title={image.filename}>
+                    {image.filename}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    {image.width.toLocaleString()} × {image.height.toLocaleString()} px
+                  </p>
+                  <button
+                    onClick={handleReset}
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:underline mt-0.5"
+                  >
+                    <RefreshCw size={11} /> Load different image
+                  </button>
+                </section>
+
+                <Divider />
+
+                {/* Scale / Calibration */}
+                <section className="space-y-2">
+                  <Label>Scale</Label>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={umPerPixel}
+                      onChange={(e) => setUmPerPixel(Number(e.target.value))}
+                      className="w-24 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      step={0.01}
+                      min={0.01}
+                      disabled={calibrating}
+                    />
+                    <span className="text-xs text-gray-500">µm / px</span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-gray-500 w-14 shrink-0">Ruler</label>
+                    <input
+                      type="number"
+                      value={rulerMm}
+                      onChange={(e) => setRulerMm(Number(e.target.value))}
+                      className="w-16 border rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400"
+                      step={1}
+                      min={0.1}
+                    />
+                    <span className="text-xs text-gray-500">mm</span>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      onClick={handleAutoCalibrate}
+                      disabled={calibrating}
+                      className="text-xs px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg disabled:opacity-50 transition-colors"
+                    >
+                      {calibrating ? 'Detecting…' : 'Auto-detect'}
+                    </button>
+                    <button
+                      onClick={() => { setCalPoints([]); setCalMode((v) => !v); setCalibrateError(null) }}
+                      className={`text-xs px-2.5 py-1.5 rounded-lg transition-colors ${
+                        calMode
+                          ? 'bg-orange-100 text-orange-700 ring-1 ring-orange-300'
+                          : 'bg-gray-100 hover:bg-gray-200'
+                      }`}
+                    >
+                      {calMode ? 'Cancel' : 'Manual'}
+                    </button>
+                  </div>
+
+                  {calMode && (
+                    <div className="rounded-lg bg-orange-50 border border-orange-200 p-2.5 text-xs text-orange-800 space-y-0.5">
+                      <p className="font-medium">Click two points on the ruler</p>
+                      <p className="text-orange-600">
+                        {calPoints.length === 0
+                          ? 'Click the first point on the image →'
+                          : 'Point 1 captured. Click the second point →'}
+                      </p>
+                      <p className="text-orange-500 text-[11px]">Press Esc to cancel</p>
+                    </div>
+                  )}
+
+                  {calibrateError && <p className="text-xs text-amber-600">{calibrateError}</p>}
+                </section>
+
+                <Divider />
+
+                {/* Detection */}
+                <section className="space-y-3">
+                  <Label>Detection</Label>
+
+                  {/* Confidence slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs text-gray-500">Confidence</span>
+                      <span className="text-xs font-medium text-gray-800 tabular-nums">{conf.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      value={conf}
+                      onChange={(e) => setConf(Number(e.target.value))}
+                      className="w-full accent-blue-600"
+                      step={0.05}
+                      min={0.1}
+                      max={1.0}
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-300">
+                      <span>0.10</span>
+                      <span>1.00</span>
+                    </div>
+                  </div>
+
+                  {/* Advanced toggle */}
+                  <button
+                    onClick={() => setAdvancedOpen((v) => !v)}
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600"
+                  >
+                    {advancedOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    Advanced
+                  </button>
+
+                  {advancedOpen && (
+                    <div className="space-y-2 pl-1">
+                      <Row label="Tile size">
+                        <input
+                          type="number"
+                          value={tileSize}
+                          onChange={(e) => setTileSize(Number(e.target.value))}
+                          className="w-20 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          step={64}
+                          min={256}
+                        />
+                        <span className="text-xs text-gray-400">px</span>
+                      </Row>
+                      <Row label="Overlap">
+                        <input
+                          type="number"
+                          value={overlap}
+                          onChange={(e) => setOverlap(Number(e.target.value))}
+                          className="w-20 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          step={32}
+                          min={0}
+                        />
+                        <span className="text-xs text-gray-400">px</span>
+                      </Row>
+                      <Row label="Device">
+                        <input
+                          type="text"
+                          value={device}
+                          onChange={(e) => setDevice(e.target.value)}
+                          className="w-20 border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          placeholder="0 / cpu"
+                        />
+                      </Row>
+                    </div>
+                  )}
+
+                  {!detectionJob || detectionJob.status === 'failed' ? (
+                    <>
+                      <button
+                        onClick={handleRunDetection}
+                        className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                      >
+                        Run Detection
+                      </button>
+                      {detectionError && <p className="text-xs text-red-600">{detectionError}</p>}
+                      {detectionJob?.status === 'failed' && detectionJob.error && (
+                        <p className="text-xs text-red-600">{detectionJob.error}</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <JobProgress job={detectionJob} />
+                      {detectionDone && (
                         <button
-                          onClick={handleRunMeasurement}
-                          className="w-full py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                          onClick={() => setDetectionJobId(null)}
+                          className="text-xs text-gray-400 hover:text-gray-600"
                         >
-                          Measure Organisms
+                          Re-run with different params
                         </button>
-                        {measureError && (
-                          <p className="text-xs text-red-600">{measureError}</p>
-                        )}
-                        {measureJob?.status === 'failed' && measureJob.error && (
-                          <p className="text-xs text-red-600">{measureJob.error}</p>
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <JobProgress job={measureJob} />
-                        {measurementDone && (
-                          <button
-                            onClick={() => { setMeasureJobId(null); setCsvData(null) }}
-                            className="text-xs text-gray-400 hover:text-gray-600"
-                          >
-                            Re-run measurements
-                          </button>
-                        )}
-                      </>
-                    )}
+                      )}
+                    </>
+                  )}
 
-                    {measurementDone && (
-                      <>
-                        <p className="text-sm font-medium text-green-700">
-                          ✓ {measureJob!.result.num_organisms} organisms measured
-                        </p>
-                        <a
-                          href={outputFileUrl(
-                            measureJob!.id,
-                            measureJob!.result.csv_path.split('/').pop()!,
-                          )}
-                          download
-                          className="flex items-center justify-center gap-2 w-full py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  {detectionDone && (
+                    <p className="text-sm font-medium text-green-700">
+                      ✓ {detectionJob!.result.num_detections} organisms detected
+                    </p>
+                  )}
+
+                  {detectionDone && !refineMode && (
+                    <button
+                      onClick={() => { setRefineMode(true); setDrawMode(false) }}
+                      className="w-full py-2 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 transition-colors"
+                    >
+                      Edit Detections
+                    </button>
+                  )}
+                </section>
+
+                {/* Refinement panel */}
+                {refineMode && (
+                  <>
+                    <Divider />
+                    <section className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <Label>Edit Detections</Label>
+                        <button
+                          onClick={() => { setRefineMode(false); setDrawMode(false) }}
+                          className="text-xs text-gray-400 hover:text-gray-600"
                         >
-                          <Download size={14} />
-                          Export CSV
-                        </a>
-                      </>
-                    )}
-                  </section>
-                </>
-              )}
-            </div>
-          </aside>
+                          Exit
+                        </button>
+                      </div>
 
-          {/* ── Main area: image viewer + measurement table ── */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <div className={`relative ${csvData ? 'h-[58%] shrink-0' : 'flex-1'}`}>
+                      {refinement.isLoading && <p className="text-xs text-gray-500">Loading boxes…</p>}
+                      {refinement.error && <p className="text-xs text-red-600">{refinement.error}</p>}
+
+                      {!refinement.isLoading && (
+                        <p className="text-xs text-gray-600">
+                          <span className="text-green-600 font-medium">✓ {refinement.acceptedCount}</span>
+                          {refinement.addedCount > 0 && (
+                            <span className="text-blue-500 font-medium"> · +{refinement.addedCount} drawn</span>
+                          )}
+                          {refinement.rejectedCount > 0 && (
+                            <span className="text-red-500 font-medium"> · ✗ {refinement.rejectedCount} invalid</span>
+                          )}
+                        </p>
+                      )}
+
+                      <button
+                        onClick={handleSaveAnnotations}
+                        disabled={refinement.isSaving}
+                        className="w-full py-2 bg-gray-800 text-white rounded-lg text-sm font-medium hover:bg-gray-900 disabled:opacity-50 transition-colors"
+                      >
+                        {refinement.isSaving ? 'Saving…' : 'Save Annotations'}
+                      </button>
+                      {refineSaveError && <p className="text-xs text-red-600">{refineSaveError}</p>}
+                      {refinement.annotationsSaved && (
+                        <p className="text-xs text-green-600">✓ Annotations saved</p>
+                      )}
+
+                      {refinement.annotationsSaved && image && (
+                        <div className="flex gap-2">
+                          <a
+                            href={annotationExportUrl(image.image_id, 'json')}
+                            download
+                            className="flex-1 text-center text-xs py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            JSON
+                          </a>
+                          <a
+                            href={annotationExportUrl(image.image_id, 'csv')}
+                            download
+                            className="flex-1 text-center text-xs py-1.5 border rounded-lg hover:bg-gray-50 transition-colors"
+                          >
+                            CSV
+                          </a>
+                        </div>
+                      )}
+
+                      {role === 'admin' && refinement.annotationsSaved && image && detectionJobId && (
+                        <>
+                          <Divider />
+                          <Label>Fine-tune</Label>
+                          <FineTunePanel
+                            imageId={image.image_id}
+                            onModelSelected={(path) => setSelectedModel(path)}
+                          />
+                          {selectedModel && (
+                            <p className="text-xs text-violet-700 truncate">
+                              Active: {selectedModel.split('/').pop()}
+                            </p>
+                          )}
+                        </>
+                      )}
+                    </section>
+                  </>
+                )}
+
+                {/* Project context */}
+                {detectionDone && currentProjectId && (
+                  <>
+                    <Divider />
+                    <section className="space-y-1.5">
+                      <Label>Project</Label>
+                      <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1.5">
+                        ✓ Results saved to{' '}
+                        <Link to={`/projects/${currentProjectId}`} className="font-medium hover:underline">
+                          {currentProjectName ?? 'project'}
+                        </Link>
+                      </p>
+                    </section>
+                  </>
+                )}
+
+                {/* Measurements */}
+                {detectionDone && (
+                  <>
+                    <Divider />
+                    <section className="space-y-3">
+                      <Label>Measurements</Label>
+
+                      <div className="flex gap-1.5">
+                        {(['fast', 'sam'] as const).map((m) => (
+                          <button
+                            key={m}
+                            onClick={() => setMeasureMethod(m)}
+                            className={`flex-1 py-1.5 rounded-lg text-xs border transition-colors ${
+                              measureMethod === m
+                                ? 'bg-blue-50 border-blue-300 text-blue-700 font-medium'
+                                : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'
+                            }`}
+                          >
+                            {m === 'fast' ? 'Fast (ellipse)' : 'Accurate (SAM)'}
+                          </button>
+                        ))}
+                      </div>
+                      {measureMethod === 'sam' && (
+                        <p className="text-xs text-amber-600">
+                          SAM is ~1 org/sec — may take several minutes for large samples.
+                        </p>
+                      )}
+
+                      {refinement.annotationsSaved ? (
+                        <p className="text-xs text-teal-700 bg-teal-50 rounded px-2 py-1.5">
+                          ✓ Using your edited detections
+                        </p>
+                      ) : refinement.boxes.some((b) => b.status !== 'accepted') ? (
+                        <p className="text-xs text-amber-600">
+                          Save annotations first to include your edits.
+                        </p>
+                      ) : null}
+
+                      {!measureJob || measureJob.status === 'failed' ? (
+                        <>
+                          <button
+                            onClick={handleRunMeasurement}
+                            className="w-full py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+                          >
+                            Measure Organisms
+                          </button>
+                          {measureError && <p className="text-xs text-red-600">{measureError}</p>}
+                          {measureJob?.status === 'failed' && measureJob.error && (
+                            <p className="text-xs text-red-600">{measureJob.error}</p>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <JobProgress job={measureJob} />
+                          {measurementDone && (
+                            <button
+                              onClick={() => { setMeasureJobId(null); setCsvData(null) }}
+                              className="text-xs text-gray-400 hover:text-gray-600"
+                            >
+                              Re-run measurements
+                            </button>
+                          )}
+                        </>
+                      )}
+
+                      {measurementDone && (
+                        <>
+                          <p className="text-sm font-medium text-green-700">
+                            ✓ {measureJob!.result.num_organisms} organisms measured
+                          </p>
+                          <a
+                            href={outputFileUrl(
+                              measureJob!.id,
+                              measureJob!.result.csv_path.split('/').pop()!,
+                            )}
+                            download
+                            className="flex items-center justify-center gap-2 w-full py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                          >
+                            <Download size={14} />
+                            Export CSV
+                          </a>
+                        </>
+                      )}
+                    </section>
+                  </>
+                )}
+              </div>
+            </aside>
+          )}
+
+          {/* ── Main area: viewer + table ── */}
+          <div className="flex-1 flex flex-col overflow-hidden" ref={mainAreaRef}>
+
+            {/* Viewer */}
+            <div
+              className="relative shrink-0"
+              style={{ height: csvData ? `calc(${splitPercent}% - 3px)` : '100%' }}
+            >
+              {/* Contours toggle — only visible when SAM overlay exists */}
+              {hasSamOverlay && (
+                <button
+                  onClick={() => setShowContours((v) => !v)}
+                  className={`absolute top-2 left-2 z-20 text-xs px-3 py-1.5 rounded-lg border shadow-sm transition-colors ${
+                    showContours
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white/90 backdrop-blur-sm border-gray-200 text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  Contours
+                </button>
+              )}
+
+              {/* Overlay label badge — only when there's something to say */}
+              {overlayLabel && (
+                <div className="absolute bottom-2 left-2 z-20 pointer-events-none">
+                  <span className="text-[11px] bg-black/40 text-white rounded px-2 py-0.5 backdrop-blur-sm">
+                    {overlayLabel}
+                  </span>
+                </div>
+              )}
+
               {/* Floating annotation toolbar */}
               {refineMode && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-0.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5">
-                  {/* Mode: Select / Draw */}
                   {(['review', 'draw'] as const).map((m) => (
                     <button
                       key={m}
@@ -777,32 +916,39 @@ export default function WorkspacePage() {
                         refinement.selectBox(null)
                         if (m === 'draw') setShowAnnotations(true)
                       }}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
                         (m === 'draw') === drawMode
                           ? 'bg-amber-500 text-white'
                           : 'text-gray-600 hover:bg-gray-100'
                       }`}
                     >
-                      {m === 'review' ? 'Select' : 'Draw'}
+                      <span>{m === 'review' ? 'Select' : 'Draw'}</span>
+                      <kbd className={`text-[9px] px-1 py-0.5 rounded border font-mono ${
+                        (m === 'draw') === drawMode
+                          ? 'border-amber-300 bg-amber-400/40'
+                          : 'border-gray-200 bg-gray-50 text-gray-400'
+                      }`}>
+                        {m === 'review' ? 'S' : 'D'}
+                      </kbd>
                     </button>
                   ))}
 
                   <div className="border-t border-gray-200 my-0.5" />
 
-                  {/* Show / Hide annotations */}
                   <button
                     onClick={() => setShowAnnotations((v) => !v)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
                       showAnnotations
                         ? 'text-gray-600 hover:bg-gray-100'
                         : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
                     }`}
-                    title={showAnnotations ? 'Hide annotations' : 'Show annotations'}
                   >
-                    {showAnnotations ? 'Hide' : 'Show'}
+                    <span>{showAnnotations ? 'Hide' : 'Show'}</span>
+                    <kbd className="text-[9px] px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-400 font-mono">
+                      H
+                    </kbd>
                   </button>
 
-                  {/* Selected box actions */}
                   {!drawMode && refinement.selectedId && (() => {
                     const sel = refinement.boxes.find((b) => b.id === refinement.selectedId)
                     const isAdded = sel?.status === 'added'
@@ -813,27 +959,30 @@ export default function WorkspacePage() {
                         {isAdded ? (
                           <button
                             onClick={() => refinement.removeBox(refinement.selectedId!)}
-                            className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 transition-colors"
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium text-red-600 hover:bg-red-50 flex items-center justify-between gap-3"
                           >
-                            Delete
+                            <span>Delete</span>
+                            <kbd className="text-[9px] px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-400 font-mono">Del</kbd>
                           </button>
                         ) : (
                           <button
                             onClick={() => refinement.toggleBox(refinement.selectedId!)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                            className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center justify-between gap-3 ${
                               isRejected
                                 ? 'text-green-600 hover:bg-green-50'
                                 : 'text-red-600 hover:bg-red-50'
                             }`}
                           >
-                            {isRejected ? 'Restore' : 'Invalid'}
+                            <span>{isRejected ? 'Restore' : 'Invalid'}</span>
+                            <kbd className="text-[9px] px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-400 font-mono">Del</kbd>
                           </button>
                         )}
                         <button
                           onClick={() => refinement.selectBox(null)}
-                          className="px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:bg-gray-100 transition-colors"
+                          className="px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:bg-gray-100 flex items-center justify-between gap-3"
                         >
-                          Deselect
+                          <span>Deselect</span>
+                          <kbd className="text-[9px] px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-400 font-mono">Esc</kbd>
                         </button>
                       </>
                     )
@@ -864,13 +1013,50 @@ export default function WorkspacePage() {
               />
             </div>
 
+            {/* Drag handle */}
             {csvData && (
-              <div className="flex-1 overflow-auto border-t bg-white">
-                <div className="p-4">
-                  <p className="text-xs text-gray-400 mb-3 font-medium uppercase tracking-wide">
-                    Measurements — {csvData.length} organisms
-                  </p>
-                  <MeasurementTable data={csvData} selectedIndex={selectedMeasurementIndex} />
+              <div
+                className="h-1.5 shrink-0 bg-gray-200 hover:bg-blue-400 active:bg-blue-500 cursor-row-resize transition-colors"
+                onPointerDown={onSplitPointerDown}
+              />
+            )}
+
+            {/* Measurement table */}
+            {csvData && (
+              <div className="flex-1 flex flex-col overflow-hidden bg-white border-t min-h-0">
+                {/* Summary bar */}
+                {measureJob?.result?.summary && (
+                  <div className="shrink-0 flex gap-5 px-4 py-2 border-b bg-gray-50 overflow-x-auto">
+                    {(['length_mm', 'width_mm', 'area_mm2', 'volume_mm3'] as const).map((col) => {
+                      const s = measureJob.result.summary[col]
+                      if (!s) return null
+                      const label = col === 'length_mm' ? 'Length' : col === 'width_mm' ? 'Width' : col === 'area_mm2' ? 'Area' : 'Volume'
+                      const unit = col.endsWith('mm3') ? 'mm³' : col.endsWith('mm2') ? 'mm²' : 'mm'
+                      return (
+                        <div key={col} className="shrink-0 space-y-0.5">
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                            {label} ({unit})
+                          </p>
+                          <p className="text-sm font-medium text-gray-800">
+                            {s.mean.toFixed(3)}
+                          </p>
+                          <p className="text-[10px] text-gray-400">
+                            {s.min.toFixed(3)} – {s.max.toFixed(3)}
+                          </p>
+                        </div>
+                      )
+                    })}
+                    <div className="ml-auto shrink-0 self-center text-xs text-gray-400">
+                      n = {csvData.length}
+                    </div>
+                  </div>
+                )}
+                <div className="flex-1 overflow-hidden min-h-0">
+                  <MeasurementTable
+                    data={csvData}
+                    selectedIndex={selectedMeasurementIndex}
+                    onRowClick={handleRowClick}
+                  />
                 </div>
               </div>
             )}
