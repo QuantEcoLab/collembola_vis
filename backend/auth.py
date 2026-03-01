@@ -24,10 +24,20 @@ if _SECRET_KEY == _DEFAULT_SECRET_KEY:
 
 # ── Hardcoded users (password stored as bcrypt hash) ─────────────────────────
 # user1 / user12345  → role: user
+# user2 / user23456  → role: user
+# user3 / user34567  → role: user
 # admin / admin12345 → role: admin
 _DEFAULT_USERS: dict[str, dict] = {
     "user1": {
         "hash": b"$2b$12$YAIbQEfmn5d0IXDdGg7QzOUzrMYknVwyYuXIwrauZMrMn9NApc6Si",
+        "role": "user",
+    },
+    "user2": {
+        "hash": b"$2b$12$A9FMSIIuhm9E8KjTDd62H.J0kViN5liOw1Qte62lk5OhZYdEWGM8G",
+        "role": "user",
+    },
+    "user3": {
+        "hash": b"$2b$12$0z11MEVFPwv2CwOvgBwUCutwo4DmRlb0TDMDAoGiFBSMSTRMhV42u",
         "role": "user",
     },
     "admin": {
