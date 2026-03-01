@@ -3,6 +3,8 @@
 import csv
 import io
 import json
+import zipfile
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
@@ -93,6 +95,22 @@ class BatchMeasureRequest(BaseModel):
     device: str | None = None
 
 
+class BatchProcessRequest(BaseModel):
+    um_per_pixel: float
+    conf: float | None = None
+    tile_size: int | None = None
+    overlap: int | None = None
+    device: str | None = None
+
+
+class UpdateImageFolderRequest(BaseModel):
+    folder: str | None = None
+
+
+class RenameFolderRequest(BaseModel):
+    new_name: str
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("")
@@ -119,11 +137,13 @@ async def get_project(project_id: str):
 
 
 @router.get("/{project_id}/annotations/export")
-async def export_project_annotations(project_id: str, format: str = "json"):
+async def export_project_annotations(
+    project_id: str,
+    format: str = "json",
+    username: str = Depends(get_current_user),
+):
     """Export all annotations for every image in the project as a single file."""
-    project = db_projects.get_project(project_id)
-    if project is None:
-        raise HTTPException(404, "Project not found")
+    project = _require_owner(project_id, username)
 
     images = project.get("images", [])
     combined = []
@@ -272,6 +292,47 @@ async def batch_detect(
     return {"job_id": job.id, "status": job.status.value}
 
 
+@router.post("/{project_id}/process")
+async def batch_process(
+    project_id: str,
+    req: BatchProcessRequest,
+    username: str = Depends(get_current_user),
+):
+    """Detect and measure all images in a project in a single job."""
+    _require_owner(project_id, username)
+    project = db_projects.get_project(project_id)
+    images = project.get("images", [])
+    if not images:
+        raise HTTPException(400, "Project has no images")
+
+    image_entries = []
+    for img in images:
+        info = get_image_info(img["image_id"])
+        if info is None:
+            continue
+        image_entries.append({
+            "image_id": img["image_id"],
+            "image_path": info["path"],
+            "filename": img["filename"],
+        })
+
+    if not image_entries:
+        raise HTTPException(400, "No valid images found in project")
+
+    params: dict = {
+        "project_id": project_id,
+        "image_entries": image_entries,
+        "um_per_pixel": req.um_per_pixel,
+    }
+    for key, val in [("conf", req.conf), ("tile_size", req.tile_size),
+                     ("overlap", req.overlap), ("device", req.device)]:
+        if val is not None:
+            params[key] = val
+
+    job = job_manager.submit(JobType.BATCH_PROCESS, params)
+    return {"job_id": job.id, "status": job.status.value}
+
+
 @router.patch("/{project_id}/images/{image_id}/jobs")
 async def update_image_jobs(
     project_id: str,
@@ -314,7 +375,7 @@ async def batch_measure(
             "image_path": info["path"],
             "filename": img["filename"],
             "detection_job_id": img["detection_job_id"],
-            "use_annotations": img["has_annotation"],
+            "use_annotations": False,  # batch always uses raw detections
         })
 
     if not image_entries:
@@ -329,3 +390,103 @@ async def batch_measure(
     }
     job = job_manager.submit(JobType.BATCH_MEASURE, params)
     return {"job_id": job.id, "status": job.status.value}
+
+
+@router.get("/{project_id}/results/download")
+async def download_results_zip(
+    project_id: str,
+    username: str = Depends(get_current_user),
+):
+    """Download all measurement CSV files for the project as a single ZIP."""
+    project = _require_owner(project_id, username)
+
+    images = project.get("images", [])
+    measured = [img for img in images if img.get("measurement_job_id")]
+    if not measured:
+        raise HTTPException(404, "No measurement results found for this project")
+
+    buf = io.BytesIO()
+    added = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        seen_names: set[str] = set()
+        for img in measured:
+            job = job_manager.get(img["measurement_job_id"])
+            if job is None or not job.result:
+                continue
+            csv_path = job.result.get("csv_path")
+            if not csv_path:
+                continue
+            csv_file = Path(csv_path)
+            if not csv_file.exists():
+                continue
+            # Deduplicate archive entry names
+            arcname = csv_file.name
+            if arcname in seen_names:
+                stem = csv_file.stem
+                arcname = f"{stem}_{img['image_id'][:8]}.csv"
+            seen_names.add(arcname)
+            zf.write(csv_file, arcname)
+            added += 1
+
+    if added == 0:
+        raise HTTPException(404, "No CSV files found — measurements may still be running")
+
+    buf.seek(0)
+    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in project["name"])
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_measurements.zip"'},
+    )
+
+
+@router.get("/{project_id}/folders")
+async def list_folders(project_id: str):
+    if db_projects.get_project(project_id) is None:
+        raise HTTPException(404, "Project not found")
+    return db_projects.list_folders(project_id)
+
+
+@router.patch("/{project_id}/images/{image_id}/folder")
+async def update_image_folder(
+    project_id: str,
+    image_id: str,
+    req: UpdateImageFolderRequest,
+    username: str = Depends(get_current_user),
+):
+    _require_owner(project_id, username)
+    # Normalise empty string to None
+    folder = req.folder.strip() if req.folder else None
+    folder = folder or None
+    found = db_projects.set_image_folder(project_id, image_id, folder)
+    if not found:
+        raise HTTPException(404, "Image not found in project")
+    return {"ok": True}
+
+
+@router.delete("/{project_id}/folders/{folder_name}")
+async def delete_folder(
+    project_id: str,
+    folder_name: str,
+    username: str = Depends(get_current_user),
+):
+    """Unassign all images from a folder and remove it."""
+    _require_owner(project_id, username)
+    db_projects.delete_folder(project_id, folder_name)
+    return {"ok": True}
+
+
+@router.patch("/{project_id}/folders/{folder_name}")
+async def rename_folder(
+    project_id: str,
+    folder_name: str,
+    req: RenameFolderRequest,
+    username: str = Depends(get_current_user),
+):
+    """Rename a folder across all its images."""
+    _require_owner(project_id, username)
+    new_name = req.new_name.strip()
+    if not new_name:
+        raise HTTPException(400, "New folder name cannot be empty")
+    db_projects.rename_folder(project_id, folder_name, new_name)
+    return {"ok": True}

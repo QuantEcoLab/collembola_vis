@@ -6,6 +6,8 @@ import {
   saveAnnotations as saveAnnotationsApi,
 } from '../api/client'
 
+const MIN_BOX_PX = 5 // ignore accidental drags smaller than this threshold
+
 interface DrawingBox {
   x1: number; y1: number; x2: number; y2: number
 }
@@ -36,6 +38,7 @@ interface UseRefinementResult {
 export function useRefinement(
   imageId: string | null,
   detectionJobId: string | null,
+  detectionDone: boolean,
 ): UseRefinementResult {
   const [boxes, setBoxes] = useState<AnnotatedBox[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -48,11 +51,13 @@ export function useRefinement(
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
   // Load boxes whenever imageId or detectionJobId changes.
-  // When detectionJobId is null (job not in memory / server restart) we still
-  // try to restore saved annotations so previously-annotated images load correctly.
+  // Priority: saved annotations > detection boxes.
+  // Saved annotations represent human-reviewed work and are always preferred,
+  // regardless of which detection job they originated from.
   useEffect(() => {
     if (!imageId) {
       setBoxes([])
+      setSelectedId(null)
       setAnnotationsSaved(false)
       setRestoredSourceJobId(null)
       return
@@ -61,27 +66,26 @@ export function useRefinement(
     let cancelled = false
     setIsLoading(true)
     setError(null)
+    setBoxes([])
+    setSelectedId(null)
     setAnnotationsSaved(false)
     setRestoredSourceJobId(null)
 
     async function load() {
       try {
-        // Always try saved annotations first.
-        // Restore if: no detection job (job lost from memory) OR source_job_id matches.
+        // Always try saved annotations first — they represent human-reviewed work
+        // and take priority over any detection job's raw output.
         let restored = false
         try {
           const ann = await getAnnotations(imageId!)
-          if (ann.boxes.length > 0) {
-            const shouldRestore = !detectionJobId || ann.source_job_id === detectionJobId
-            if (shouldRestore && !cancelled) {
-              setBoxes(ann.boxes)
-              setAnnotationsSaved(true)
-              setRestoredSourceJobId(ann.source_job_id)
-              restored = true
-            }
+          if (ann.boxes.length > 0 && !cancelled) {
+            setBoxes(ann.boxes)
+            setAnnotationsSaved(true)
+            setRestoredSourceJobId(ann.source_job_id)
+            restored = true
           }
         } catch {
-          // No saved annotations — fall through
+          // No saved annotations — fall through to detection boxes
         }
 
         if (!restored && detectionJobId && !cancelled) {
@@ -97,7 +101,7 @@ export function useRefinement(
 
     load()
     return () => { cancelled = true }
-  }, [detectionJobId, imageId])
+  }, [detectionJobId, detectionDone, imageId])
 
   const toggleBox = useCallback((id: string) => {
     setBoxes((prev) =>
@@ -142,7 +146,7 @@ export function useRefinement(
     const x2 = Math.max(drawStart.x, x)
     const y2 = Math.max(drawStart.y, y)
     // Ignore tiny accidental drags
-    if (x2 - x1 < 5 || y2 - y1 < 5) return
+    if (x2 - x1 < MIN_BOX_PX || y2 - y1 < MIN_BOX_PX) return
     const newBox: AnnotatedBox = {
       id: `added-${Date.now()}`,
       x1, y1, x2, y2,

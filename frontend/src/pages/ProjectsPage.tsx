@@ -1,15 +1,32 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { LogOut, Plus, FolderOpen } from 'lucide-react'
-import { listProjects, createProject } from '../api/client'
+import { LogOut, Plus, FolderOpen, Loader2, Trash2, X } from 'lucide-react'
+import { listProjects, createProject, deleteProject } from '../api/client'
 import { thumbnailUrl } from '../api/client'
 import { useAuthStore } from '../store/authStore'
+import { useJobProgress } from '../hooks/useJob'
 import type { Project } from '../api/types'
+
+// ── Processing badge ─────────────────────────────────────────────────────────
+
+function ProcessingBadge({ projectId }: { projectId: string }) {
+  const [processJobId] = useState(() => localStorage.getItem(`collembola_process_${projectId}`))
+  const processJob = useJobProgress(processJobId)
+
+  const running = processJob?.status === 'running' || processJob?.status === 'pending'
+  if (!running) return null
+
+  return (
+    <div className="absolute top-2 right-2 flex items-center gap-1 bg-blue-600 text-white text-[10px] font-semibold px-2 py-1 rounded-full shadow-md">
+      <Loader2 size={9} className="animate-spin" />
+      Processing
+    </div>
+  )
+}
 
 export default function ProjectsPage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
-
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -17,6 +34,9 @@ export default function ProjectsPage() {
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
   const [formError, setFormError] = useState('')
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
     listProjects()
@@ -37,6 +57,20 @@ export default function ProjectsPage() {
       setFormError(err.message || 'Failed to create project')
     } finally {
       setCreating(false)
+    }
+  }
+
+  const handleDelete = async (projectId: string) => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await deleteProject(projectId)
+      setProjects((prev) => prev.filter((p) => p.id !== projectId))
+      setConfirmDeleteId(null)
+    } catch (e: any) {
+      setDeleteError(e.message || 'Failed to delete')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -156,38 +190,76 @@ export default function ProjectsPage() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {projects.map((p) => (
-                <button
+                <div
                   key={p.id}
-                  onClick={() => navigate(`/projects/${p.id}`)}
-                  className="bg-white border rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-sm transition-all text-left group"
+                  className="bg-white border rounded-xl overflow-hidden hover:border-blue-300 hover:shadow-sm transition-all group relative"
                 >
-                  {/* Thumbnail */}
-                  <div className="h-36 bg-gray-100 relative overflow-hidden">
-                    {p.thumbnail_image_id ? (
-                      <img
-                        src={thumbnailUrl(p.thumbnail_image_id)}
-                        alt=""
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <FolderOpen size={32} className="text-gray-300" />
-                      </div>
-                    )}
-                  </div>
+                  {/* Thumbnail — click to navigate */}
+                  <button
+                    onClick={() => navigate(`/projects/${p.id}`)}
+                    className="block w-full text-left"
+                  >
+                    <div className="h-36 bg-gray-100 relative overflow-hidden">
+                      {p.thumbnail_image_id ? (
+                        <img
+                          src={thumbnailUrl(p.thumbnail_image_id)}
+                          alt=""
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <FolderOpen size={32} className="text-gray-300" />
+                        </div>
+                      )}
+                      <ProcessingBadge projectId={p.id} />
+                    </div>
 
-                  {/* Info */}
-                  <div className="p-4 space-y-1">
-                    <p className="font-medium text-gray-900 truncate">{p.name}</p>
-                    {p.description && (
-                      <p className="text-xs text-gray-500 truncate">{p.description}</p>
+                    {/* Info */}
+                    <div className="p-4 space-y-1">
+                      <p className="font-medium text-gray-900 truncate">{p.name}</p>
+                      {p.description && (
+                        <p className="text-xs text-gray-500 truncate">{p.description}</p>
+                      )}
+                      <p className="text-xs text-gray-400">
+                        {p.image_count} image{p.image_count !== 1 ? 's' : ''}{' · '}
+                        {p.created_by}{' · '}{fmtDate(p.created_at)}
+                      </p>
+                    </div>
+                  </button>
+
+                  {/* Delete controls */}
+                  <div className="px-4 pb-3">
+                    {confirmDeleteId === p.id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-red-600 font-medium flex-1">
+                          {deleteError ?? 'Delete project?'}
+                        </span>
+                        <button
+                          onClick={() => handleDelete(p.id)}
+                          disabled={deleting}
+                          className="flex items-center gap-1 text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded font-medium disabled:opacity-50 transition-colors"
+                        >
+                          {deleting ? <Loader2 size={10} className="animate-spin" /> : null}
+                          Yes, delete
+                        </button>
+                        <button
+                          onClick={() => { setConfirmDeleteId(null); setDeleteError(null) }}
+                          className="text-xs text-gray-400 hover:text-gray-600 p-1"
+                        >
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setConfirmDeleteId(p.id); setDeleteError(null) }}
+                        className="flex items-center gap-1 text-xs text-gray-400 hover:text-red-600 transition-colors"
+                      >
+                        <Trash2 size={11} />
+                        Delete
+                      </button>
                     )}
-                    <p className="text-xs text-gray-400">
-                      {p.image_count} image{p.image_count !== 1 ? 's' : ''}{' · '}
-                      {p.created_by}{' · '}{fmtDate(p.created_at)}
-                    </p>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           )}

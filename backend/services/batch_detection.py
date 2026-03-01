@@ -46,8 +46,8 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
 
         # Use a sub-job-id as the output dir so workspace can later find the CSV
         import uuid
-        sub_job_id = uuid.uuid4().hex[:12]
-        output_dir = settings.outputs_dir / sub_job_id
+        det_job_id = uuid.uuid4().hex[:12]
+        output_dir = settings.outputs_dir / det_job_id
 
         try:
             detections = infer_tiled(
@@ -67,7 +67,8 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
             overlay_path = output_dir / f"{image_stem}_overlay.jpg"
             metadata_path = output_dir / f"{image_stem}_metadata.json"
 
-            # Register as a completed DETECTION job so workspace can load it
+            # Register as a completed DETECTION job so workspace can load it.
+            # Pass det_job_id so the job ID matches the output directory.
             sub_job = job_manager.register_completed(
                 JobType.DETECTION,
                 params={"image_path": str(image_path)},
@@ -79,6 +80,7 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
                     "image_path": str(image_path),
                     "image_stem": image_stem,
                 },
+                job_id=det_job_id,
             )
 
             # Persist detection_job_id in project_images

@@ -43,10 +43,17 @@ def init_project_db() -> None:
                 added_at TEXT NOT NULL,
                 detection_job_id TEXT,
                 measurement_job_id TEXT,
+                folder TEXT DEFAULT NULL,
                 UNIQUE(project_id, image_id)
             )
         """)
         conn.commit()
+        # Idempotent migration: add folder column to existing databases
+        try:
+            conn.execute("ALTER TABLE project_images ADD COLUMN folder TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            pass  # Column already exists
 
 
 def _now() -> str:
@@ -167,3 +174,46 @@ def set_measurement_job(project_id: str, image_id: str, job_id: str) -> None:
             (job_id, project_id, image_id),
         )
         conn.commit()
+
+
+def set_image_folder(project_id: str, image_id: str, folder: str | None) -> bool:
+    """Set (or clear) the folder for a project image. Returns True if the row was found."""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "UPDATE project_images SET folder = ? WHERE project_id = ? AND image_id = ?",
+            (folder, project_id, image_id),
+        )
+        conn.commit()
+    return cur.rowcount > 0
+
+
+def list_folders(project_id: str) -> list[str]:
+    """Return distinct non-null folder names for a project, sorted."""
+    with _lock, _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT folder FROM project_images WHERE project_id = ? AND folder IS NOT NULL ORDER BY folder",
+            (project_id,),
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def delete_folder(project_id: str, folder_name: str) -> int:
+    """Unassign all images from a folder (sets folder to NULL). Returns affected row count."""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "UPDATE project_images SET folder = NULL WHERE project_id = ? AND folder = ?",
+            (project_id, folder_name),
+        )
+        conn.commit()
+    return cur.rowcount
+
+
+def rename_folder(project_id: str, old_name: str, new_name: str) -> int:
+    """Rename a folder across all images. Returns affected row count."""
+    with _lock, _connect() as conn:
+        cur = conn.execute(
+            "UPDATE project_images SET folder = ? WHERE project_id = ? AND folder = ?",
+            (new_name, project_id, old_name),
+        )
+        conn.commit()
+    return cur.rowcount

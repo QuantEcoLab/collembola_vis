@@ -155,13 +155,18 @@ class JobManager:
     def list_jobs(self) -> list[Job]:
         return list(self._jobs.values())
 
-    def register_completed(self, job_type: JobType, params: dict, result: dict) -> Job:
+    def register_completed(self, job_type: JobType, params: dict, result: dict, job_id: str | None = None) -> Job:
         """Register a pre-completed job without going through the queue.
 
         Used by batch detection to record per-image sub-jobs that were run
         inline (not via the worker thread).
+
+        Pass ``job_id`` to reuse an ID that was already used as an output
+        directory, so that ``outputFileUrl(job.id, filename)`` resolves
+        correctly in the frontend.
         """
-        job_id = uuid.uuid4().hex[:12]
+        if job_id is None:
+            job_id = uuid.uuid4().hex[:12]
         now = datetime.now()
         job = Job(
             id=job_id,

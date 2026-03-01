@@ -23,13 +23,20 @@ export interface CalibrationResult {
   known_mm?: number
 }
 
+export interface JobResult {
+  csv_path?: string
+  excel_path?: string
+  overlay_path?: string
+  [key: string]: unknown
+}
+
 export interface Job {
   id: string
-  type: 'detection' | 'measurement' | 'calibration' | 'batch' | 'finetune'
+  type: 'detection' | 'measurement' | 'calibration' | 'batch' | 'batch_measure' | 'batch_process' | 'finetune'
   status: 'pending' | 'running' | 'completed' | 'failed'
   progress: number
   message: string
-  result: Record<string, any>
+  result: JobResult
   error: string | null
   created_at: string
   started_at: string | null
@@ -95,6 +102,7 @@ export interface ProjectImage {
   has_annotation: boolean
   annotation_total: number
   annotation_accepted: number
+  folder: string | null
 }
 
 export interface ProjectDetail extends Project {

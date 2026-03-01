@@ -1,24 +1,22 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { LogOut, RefreshCw, ChevronRight, Settings2 } from 'lucide-react'
+import { LogOut, ChevronLeft, ChevronRight, Table2, MousePointer2, Square, XCircle, Pencil, CheckCircle2 } from 'lucide-react'
 import ImageUploader from '../components/ImageUploader'
 import ImageViewer from '../components/ImageViewer'
 import BboxOverlay from '../components/BboxOverlay'
-import JobProgress from '../components/JobProgress'
-import MeasurementTable from '../components/MeasurementTable'
-import { StepCard } from '../components/StepCard'
-import { ManualCalibrationModal } from '../components/ManualCalibrationModal'
 import { AdvancedDetectionModal } from '../components/AdvancedDetectionModal'
 import { FineTuneModal } from '../components/FineTuneModal'
 import { ViewerToolbar, type OverlayMode } from '../components/ViewerToolbar'
-import { PathDecisionCard } from '../components/PathDecisionCard'
-import { NavigationWarningDialog } from '../components/NavigationWarningDialog'
+import { MeasurementModal } from '../components/MeasurementModal'
+import { WorkspaceSidebar } from '../components/WorkspaceSidebar'
 import {
   runDetection,
   runMeasurement,
   imageUrl,
   outputFileUrl,
   updateProjectImageJobs,
+  getProject,
+  getImage,
 } from '../api/client'
 import { useJobProgress } from '../hooks/useJob'
 import { useRefinement } from '../hooks/useRefinement'
@@ -26,17 +24,9 @@ import { useCalibrationStore } from '../store/calibrationStore'
 import { useAuthStore } from '../store/authStore'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { useProjectStore } from '../store/projectStore'
-import type { ImageInfo } from '../api/types'
+import type { ImageInfo, ProjectImage } from '../api/types'
 
-type WorkflowStep = 1 | 2 | 3 | 4
-type ModalType = 'manual-calibration' | 'advanced-detection' | 'finetune' | null
-
-// Common presets for calibration
-const CALIBRATION_PRESETS = [
-  { label: '8.57 μm/px (default)', value: 8.57 },
-  { label: '10.0 μm/px', value: 10.0 },
-  { label: '5.0 μm/px', value: 5.0 },
-]
+type ModalType = 'advanced-detection' | 'finetune' | null
 
 export default function WorkspacePage() {
   const navigate = useNavigate()
@@ -54,8 +44,6 @@ export default function WorkspacePage() {
   }
 
   // ── Workflow State ──────────────────────────────────────────────────
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>(1)
-  const [annotationPath, setAnnotationPath] = useState(false) // User chose to edit annotations?
   const [modalOpen, setModalOpen] = useState<ModalType>(null)
 
   // ── Calibration ─────────────────────────────────────────────────────
@@ -64,8 +52,6 @@ export default function WorkspacePage() {
     setUmPerPixelState(v)
     calStore.setUmManual(v)
   }
-  const [calibrateError, setCalibrateError] = useState<string | null>(null)
-
   // ── Detection ───────────────────────────────────────────────────────
   const [conf] = useState(0.6)
   const [tileSize] = useState(1280)
@@ -83,12 +69,14 @@ export default function WorkspacePage() {
   const detectionDone = detectionJob?.status === 'completed'
 
   // ── Refinement (Annotation Editing) ─────────────────────────────────
+  type EditTool = 'select' | 'reject' | 'draw'
   const [refineMode, setRefineMode] = useState(false)
-  const [drawMode, setDrawMode] = useState(false)
+  const [editTool, setEditTool] = useState<EditTool>('select')
   const [refineSaveError, setRefineSaveError] = useState<string | null>(null)
   const refinement = useRefinement(
     image?.image_id ?? null,
-    detectionDone ? detectionJobId : null
+    detectionJobId,
+    detectionDone,
   )
 
   // ── Measurement ─────────────────────────────────────────────────────
@@ -107,19 +95,43 @@ export default function WorkspacePage() {
 
   // ── View State ──────────────────────────────────────────────────────
   const [overlayMode, setOverlayMode] = useState<OverlayMode>('raw')
-  const [splitPercent, setSplitPercent] = useState(58)
+  const prevOverlayModeRef = useRef<OverlayMode>('boxes')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const mainAreaRef = useRef<HTMLDivElement>(null)
+  const [showMeasurementModal, setShowMeasurementModal] = useState(false)
 
-  // ── Navigation Warning ──────────────────────────────────────────────
-  const [navigationTarget, setNavigationTarget] = useState<WorkflowStep | null>(null)
-  const [showNavigationWarning, setShowNavigationWarning] = useState(false)
+  // ── Project image list (for next/prev navigation) ──────────────────
+  const [projectImages, setProjectImages] = useState<ProjectImage[]>([])
+
+  useEffect(() => {
+    if (!currentProjectId) { setProjectImages([]); return }
+    getProject(currentProjectId)
+      .then((p) => setProjectImages(p.images))
+      .catch(() => {})
+  }, [currentProjectId])
+
+  const siblingImages = useMemo(() => {
+    if (!image || projectImages.length === 0) return []
+    const currentEntry = projectImages.find((pi) => pi.image_id === image.image_id)
+    const currentFolder = currentEntry?.folder ?? null
+    return projectImages.filter((pi) => (pi.folder ?? null) === currentFolder)
+  }, [image, projectImages])
+
+  const currentSiblingIndex = useMemo(() => {
+    if (!image) return -1
+    return siblingImages.findIndex((pi) => pi.image_id === image.image_id)
+  }, [image, siblingImages])
+
+  const hasPrev = currentSiblingIndex > 0
+  const hasNext = currentSiblingIndex >= 0 && currentSiblingIndex < siblingImages.length - 1
 
   // ── Derived State ───────────────────────────────────────────────────
-  const hasSamOverlay = measurementDone && !!measureJob?.result?.overlay_path
-  const samOverlayUrl = hasSamOverlay
-    ? outputFileUrl(measureJob!.id, measureJob!.result.overlay_path.split('/').pop()!)
-    : null
+  const samOverlayUrl = useMemo(() => {
+    if (!measurementDone || !measureJob?.result?.overlay_path) return null
+    const filename = (measureJob.result.overlay_path as string).split('/').pop()
+    if (!filename) return null
+    return outputFileUrl(measureJob.id, filename)
+  }, [measurementDone, measureJob])
+  const hasSamOverlay = samOverlayUrl !== null
 
   // Determine which image to show based on overlay mode
   const viewerSrc = useMemo(() => {
@@ -130,26 +142,8 @@ export default function WorkspacePage() {
     return imageUrl(image.image_id, image.filename)
   }, [image, overlayMode, samOverlayUrl])
 
-  // Show bbox overlay when mode is 'boxes' or 'both'
-  const showBboxOverlay = (overlayMode === 'boxes' || overlayMode === 'both') && detectionDone
-
-  // Workflow steps for dynamic stepper
-  const workflowSteps = useMemo(() => {
-    if (annotationPath) {
-      return [
-        { number: 1, label: 'Scale', done: calStore.umPerPixel != null },
-        { number: 2, label: 'Detect', done: detectionDone },
-        { number: 3, label: 'Edit', done: refinement.annotationsSaved },
-        { number: 4, label: 'Measure', done: measurementDone },
-      ]
-    } else {
-      return [
-        { number: 1, label: 'Scale', done: calStore.umPerPixel != null },
-        { number: 2, label: 'Detect', done: detectionDone },
-        { number: 4, label: 'Measure', done: measurementDone },
-      ]
-    }
-  }, [annotationPath, calStore.umPerPixel, detectionDone, refinement.annotationsSaved, measurementDone])
+  // Show bbox overlay when mode is 'boxes' or 'both' and there are boxes to show
+  const showBboxOverlay = (overlayMode === 'boxes' || overlayMode === 'both') && refinement.boxes.length > 0
 
   // Index of selected box within non-added boxes → maps to measurement CSV row
   const selectedMeasurementIndex = useMemo(() => {
@@ -167,10 +161,20 @@ export default function WorkspacePage() {
   useEffect(() => {
     if (refinement.annotationsSaved && !refineMode) {
       setRefineMode(true)
-      setAnnotationPath(true)
-      setCurrentStep(3)
     }
   }, [refinement.annotationsSaved, refineMode])
+
+  // Auto-show boxes overlay when boxes become available (detection result or saved annotations)
+  const boxesAutoShownRef = useRef(false)
+  useEffect(() => {
+    if (refinement.boxes.length > 0 && !boxesAutoShownRef.current) {
+      boxesAutoShownRef.current = true
+      setOverlayMode('boxes')
+    }
+    if (refinement.boxes.length === 0) {
+      boxesAutoShownRef.current = false
+    }
+  }, [refinement.boxes.length])
 
   // Auto-switch overlay mode when SAM measurement completes
   useEffect(() => {
@@ -182,25 +186,28 @@ export default function WorkspacePage() {
   // Load CSV when measurement completes
   useEffect(() => {
     if (measureJob?.status === 'completed' && measureJob.result?.csv_path) {
-      const filename = measureJob.result.csv_path.split('/').pop()!
+      const filename = (measureJob.result.csv_path as string).split('/').pop()
+      if (!filename) return
       fetch(outputFileUrl(measureJob.id, filename))
         .then((r) => r.text())
         .then((text) => {
           const lines = text.trim().split('\n')
-          const headers = lines[0].split(',')
+          if (lines.length < 2) return
+          const headers = lines[0].split(',').map((h) => h.trim())
           setCsvData(
             lines.slice(1).map((line) => {
               const vals = line.split(',')
-              const row: Record<string, any> = {}
+              const row: Record<string, unknown> = {}
               headers.forEach((h, i) => {
-                const n = Number(vals[i])
-                row[h] = isNaN(n) ? vals[i] : n
+                const raw = vals[i]?.trim() ?? ''
+                const n = Number(raw)
+                row[h] = raw !== '' && !isNaN(n) ? n : raw
               })
               return row
             })
           )
         })
-        .catch(() => {})
+        .catch((e) => console.error('[WorkspacePage] Failed to load measurement CSV', e))
     }
   }, [measureJob?.status, measureJob?.result?.csv_path, measureJob?.id])
 
@@ -210,7 +217,7 @@ export default function WorkspacePage() {
     if (detectionJob?.status !== 'completed') return
     updateProjectImageJobs(currentProjectId, image.image_id, {
       detection_job_id: detectionJobId,
-    }).catch(() => {})
+    }).catch((e) => console.error('[WorkspacePage] Failed to sync detection job to project', e))
   }, [detectionJob?.status, detectionJobId, currentProjectId, image])
 
   useEffect(() => {
@@ -218,33 +225,42 @@ export default function WorkspacePage() {
     if (measureJob?.status !== 'completed') return
     updateProjectImageJobs(currentProjectId, image.image_id, {
       measurement_job_id: measureJobId,
-    }).catch(() => {})
+    }).catch((e) => console.error('[WorkspacePage] Failed to sync measurement job to project', e))
   }, [measureJob?.status, measureJobId, currentProjectId, image])
 
-  // Listen for calibration point events from modal
-  useEffect(() => {
-    const handleStart = () => {
-      // Modal is ready to receive points
+  const navigateToImage = useCallback(async (projectImg: ProjectImage) => {
+    try {
+      const imgInfo = await getImage(projectImg.image_id)
+      // Reset all state then load new image (batched by React 18)
+      workspaceStore.reset()
+      workspaceStore.setImage(imgInfo)
+      if (projectImg.detection_job_id) workspaceStore.setDetectionJobId(projectImg.detection_job_id)
+      if (projectImg.measurement_job_id) workspaceStore.setMeasureJobId(projectImg.measurement_job_id)
+      setImageState(imgInfo)
+      setDetectionJobIdState(projectImg.detection_job_id)
+      setMeasureJobIdState(projectImg.measurement_job_id)
+      setCsvData(null)
+      setDetectionError(null)
+      setMeasureError(null)
+      setRefineMode(false)
+      setEditTool('select')
+      setRefineSaveError(null)
+      setOverlayMode('raw')
+      boxesAutoShownRef.current = false
+    } catch (e) {
+      console.error('[WorkspacePage] Failed to navigate to image', e)
     }
+  }, [workspaceStore])
 
-    const handleCancel = () => {
-      // Modal cancelled point selection
-    }
+  const handlePrev = useCallback(() => {
+    if (!hasPrev) return
+    navigateToImage(siblingImages[currentSiblingIndex - 1])
+  }, [hasPrev, siblingImages, currentSiblingIndex, navigateToImage])
 
-    const handleComplete = () => {
-      // Modal finished point selection
-    }
-
-    window.addEventListener('start-calibration-point-selection', handleStart)
-    window.addEventListener('cancel-calibration-point-selection', handleCancel)
-    window.addEventListener('complete-calibration-point-selection', handleComplete)
-
-    return () => {
-      window.removeEventListener('start-calibration-point-selection', handleStart)
-      window.removeEventListener('cancel-calibration-point-selection', handleCancel)
-      window.removeEventListener('complete-calibration-point-selection', handleComplete)
-    }
-  }, [])
+  const handleNext = useCallback(() => {
+    if (!hasNext) return
+    navigateToImage(siblingImages[currentSiblingIndex + 1])
+  }, [hasNext, siblingImages, currentSiblingIndex, navigateToImage])
 
   // Keyboard shortcuts: Esc, S, D, H, Delete/Backspace
   useEffect(() => {
@@ -253,8 +269,8 @@ export default function WorkspacePage() {
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
 
       if (e.key === 'Escape') {
-        if (drawMode) {
-          setDrawMode(false)
+        if (editTool !== 'select') {
+          setEditTool('select')
           return
         }
         if (refinement.selectedId) {
@@ -267,17 +283,24 @@ export default function WorkspacePage() {
       if (!refineMode) return
 
       if (e.key === 's' || e.key === 'S') {
-        setDrawMode(false)
+        setEditTool('select')
+        refinement.selectBox(null)
+      }
+      if (e.key === 'r' || e.key === 'R') {
+        setEditTool('reject')
         refinement.selectBox(null)
       }
       if (e.key === 'd' || e.key === 'D') {
-        setDrawMode(true)
+        setEditTool('draw')
       }
       if (e.key === 'h' || e.key === 'H') {
-        // Toggle annotations visibility (handled by overlay mode)
+        setOverlayMode((prev) => {
+          if (prev !== 'raw') { prevOverlayModeRef.current = prev; return 'raw' }
+          return prevOverlayModeRef.current
+        })
       }
 
-      if (!drawMode && refinement.selectedId) {
+      if (editTool === 'select' && refinement.selectedId) {
         if (e.key === 'Delete' || e.key === 'Backspace') {
           e.preventDefault()
           const sel = refinement.boxes.find((b) => b.id === refinement.selectedId)
@@ -285,18 +308,17 @@ export default function WorkspacePage() {
           else refinement.toggleBox(refinement.selectedId)
         }
       }
+
+      if (!refineMode || editTool !== 'draw') {
+        if (e.key === 'ArrowLeft') { e.preventDefault(); handlePrev() }
+        if (e.key === 'ArrowRight') { e.preventDefault(); handleNext() }
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [drawMode, refineMode, refinement])
+  }, [editTool, refineMode, refinement, handlePrev, handleNext])
 
   // ── Handlers ────────────────────────────────────────────────────────
-
-  const handleManualCalibrationComplete = (calculatedUmPerPixel: number) => {
-    setUmPerPixel(calculatedUmPerPixel)
-    calStore.setCalibration(calculatedUmPerPixel, '', 'manual', 1.0)
-    setCurrentStep(2) // Advance to detection step
-  }
 
   const handleRunDetection = async (config?: {
     tileSize: number
@@ -335,23 +357,14 @@ export default function WorkspacePage() {
     }
   }
 
-  const handlePathDecision = (path: 'annotate' | 'measure') => {
-    setAnnotationPath(path === 'annotate')
-    if (path === 'annotate') {
-      setRefineMode(true)
-      setCurrentStep(3)
-    } else {
-      setCurrentStep(4)
-    }
-  }
-
   const handleDoneEditing = async () => {
     const effectiveJobId = detectionJobId ?? refinement.restoredSourceJobId
     if (!image || !effectiveJobId) return
     setRefineSaveError(null)
     try {
       await refinement.saveAnnotations(image.image_id, image.filename, effectiveJobId)
-      setCurrentStep(4) // Advance to measurement step
+      setRefineMode(false)
+      setEditTool('select')
     } catch (e: any) {
       setRefineSaveError(e.message)
     }
@@ -384,50 +397,10 @@ export default function WorkspacePage() {
     setCsvData(null)
     setDetectionError(null)
     setMeasureError(null)
-    setCalibrateError(null)
     setRefineMode(false)
-    setDrawMode(false)
+    setEditTool('select')
     setRefineSaveError(null)
     setOverlayMode('raw')
-    setSplitPercent(58)
-    setCurrentStep(1)
-    setAnnotationPath(false)
-  }
-
-  const handleStepNavigation = (targetStep: WorkflowStep) => {
-    // Check if navigation is destructive
-    const isDestructive =
-      (targetStep <= 2 && detectionDone) || (targetStep <= 3 && measurementDone)
-
-    if (isDestructive) {
-      setNavigationTarget(targetStep)
-      setShowNavigationWarning(true)
-    } else {
-      setCurrentStep(targetStep)
-    }
-  }
-
-  const handleConfirmNavigation = () => {
-    if (navigationTarget === null) return
-
-    // Clear dependent data
-    if (navigationTarget <= 2) {
-      // Re-running detection clears everything
-      setDetectionJobIdState(null)
-      setMeasureJobIdState(null)
-      setCsvData(null)
-      refinement.loadBoxes([]) // Clear boxes
-      setRefineMode(false)
-      setAnnotationPath(false)
-    } else if (navigationTarget === 3) {
-      // Re-editing clears measurements only
-      setMeasureJobIdState(null)
-      setCsvData(null)
-    }
-
-    setCurrentStep(navigationTarget)
-    setShowNavigationWarning(false)
-    setNavigationTarget(null)
   }
 
   const handleRowClick = useCallback(
@@ -435,21 +408,10 @@ export default function WorkspacePage() {
       const origBoxes = refinement.boxes.filter((b) => b.status !== 'added')
       const box = origBoxes[rowIndex]
       if (!box) return
-      if (!refineMode) {
-        setRefineMode(true)
-        setDrawMode(false)
-      }
       refinement.selectBox(box.id)
     },
-    [refinement, refineMode]
+    [refinement]
   )
-
-  const handleImageClick = (x: number, y: number) => {
-    // Emit event for manual calibration modal if it's listening
-    window.dispatchEvent(
-      new CustomEvent('calibration-point-selected', { detail: { x, y } })
-    )
-  }
 
   const handleExport = (format: 'image' | 'csv' | 'excel') => {
     if (!measureJob || !measureJob.result) return
@@ -477,45 +439,6 @@ export default function WorkspacePage() {
     }
   }
 
-  // Split drag handler
-  const onSplitPointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault()
-    const onMove = (ev: PointerEvent) => {
-      const rect = mainAreaRef.current?.getBoundingClientRect()
-      if (!rect) return
-      const pct = ((ev.clientY - rect.top) / rect.height) * 100
-      setSplitPercent(Math.max(20, Math.min(80, pct)))
-    }
-    const onUp = () => {
-      document.removeEventListener('pointermove', onMove)
-      document.removeEventListener('pointerup', onUp)
-    }
-    document.addEventListener('pointermove', onMove)
-    document.addEventListener('pointerup', onUp)
-  }, [])
-
-  // ── Step Status Helper ──────────────────────────────────────────────
-  const getStepStatus = (step: WorkflowStep): 'pending' | 'active' | 'complete' | 'loading' => {
-    if (step === 1) {
-      if (currentStep > 1) return 'complete'
-      return currentStep === 1 ? 'active' : 'pending'
-    }
-    if (step === 2) {
-      if (detectionDone) return 'complete'
-      if (detectionJob && detectionJob.status === 'running') return 'loading'
-      return currentStep === 2 ? 'active' : 'pending'
-    }
-    if (step === 3) {
-      if (refinement.annotationsSaved) return 'complete'
-      return currentStep === 3 ? 'active' : 'pending'
-    }
-    if (step === 4) {
-      if (measurementDone) return 'complete'
-      if (measureJob && measureJob.status === 'running') return 'loading'
-      return currentStep === 4 ? 'active' : 'pending'
-    }
-    return 'pending'
-  }
 
   // ── Render ──────────────────────────────────────────────────────────
 
@@ -549,7 +472,7 @@ export default function WorkspacePage() {
           </nav>
           {image && (
             <span
-              className="text-xs text-gray-400 truncate max-w-xs hidden sm:block"
+              className="text-xs text-gray-400 truncate max-w-[200px] hidden sm:block"
               title={image.filename}
             >
               {image.filename}
@@ -597,14 +520,17 @@ export default function WorkspacePage() {
               >
                 <ChevronRight size={16} />
               </button>
-              {/* Mini workflow dots */}
+              {/* Mini status dots */}
               <div className="flex flex-col gap-1.5 mt-1">
-                {workflowSteps.map((s) => (
+                {[
+                  { done: calStore.umPerPixel != null, label: 'Scale' },
+                  { done: detectionDone, label: 'Detect' },
+                  { done: refinement.annotationsSaved, label: 'Edit' },
+                  { done: measurementDone, label: 'Measure' },
+                ].map((s) => (
                   <div
-                    key={s.number}
-                    className={`w-2.5 h-2.5 rounded-full ${
-                      s.done ? 'bg-green-500' : 'bg-gray-200'
-                    }`}
+                    key={s.label}
+                    className={`w-2.5 h-2.5 rounded-full ${s.done ? 'bg-green-500' : 'bg-gray-200'}`}
                     title={s.label}
                   />
                 ))}
@@ -612,10 +538,10 @@ export default function WorkspacePage() {
             </aside>
           ) : (
             /* Expanded sidebar */
-            <aside className="w-80 shrink-0 bg-white border-r flex flex-col overflow-hidden">
+            <aside className="w-64 md:w-64 sm:w-full shrink-0 bg-white border-r flex flex-col overflow-hidden max-w-full">
               {/* Sidebar header */}
               <div className="px-4 py-3 border-b flex items-center justify-between">
-                <h2 className="font-semibold text-gray-900">Workflow</h2>
+                <h2 className="font-semibold text-gray-900 text-sm">Workspace</h2>
                 <button
                   onClick={() => setSidebarCollapsed(true)}
                   className="text-gray-400 hover:text-gray-700 p-1 rounded hover:bg-gray-100"
@@ -625,401 +551,237 @@ export default function WorkspacePage() {
                 </button>
               </div>
 
-              {/* Workflow stepper */}
-              <div className="px-4 py-4 border-b">
-                <div className="flex items-center justify-between">
-                  {workflowSteps.map((step, idx) => (
-                    <div key={step.number} className="flex items-center">
-                      <button
-                        onClick={() => handleStepNavigation(step.number as WorkflowStep)}
-                        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
-                          step.done
-                            ? 'bg-green-500 text-white'
-                            : currentStep === step.number
-                            ? 'bg-blue-500 text-white'
-                            : 'bg-gray-200 text-gray-600'
-                        }`}
-                        title={`Step ${step.number}: ${step.label}`}
-                      >
-                        {step.number}
-                      </button>
-                      {idx < workflowSteps.length - 1 && (
-                        <div
-                          className={`w-8 h-0.5 mx-1 ${
-                            step.done ? 'bg-green-500' : 'bg-gray-200'
-                          }`}
-                        />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Scrollable step content */}
-              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-                {/* Step 1: Set Scale */}
-                {currentStep === 1 && (
-                  <StepCard
-                    stepNumber={1}
-                    title="Set Scale"
-                    status={getStepStatus(1)}
-                  >
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Quick Calibration
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="number"
-                            value={umPerPixel}
-                            onChange={(e) => setUmPerPixel(parseFloat(e.target.value))}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            step="0.01"
-                            placeholder="μm/pixel"
-                          />
-                          <select
-                            value=""
-                            onChange={(e) => setUmPerPixel(parseFloat(e.target.value))}
-                            className="px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          >
-                            <option value="">Presets</option>
-                            {CALIBRATION_PRESETS.map((preset) => (
-                              <option key={preset.value} value={preset.value}>
-                                {preset.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => setModalOpen('manual-calibration')}
-                        className="w-full px-4 py-2 border border-blue-300 rounded-lg text-blue-700 hover:bg-blue-50 font-medium transition-colors text-sm"
-                      >
-                        Manual Setup
-                      </button>
-
-                      {calStore.umPerPixel && (
-                        <button
-                          onClick={() => setCurrentStep(2)}
-                          className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors text-sm"
-                        >
-                          Continue to Detection
-                        </button>
-                      )}
-
-                      {calibrateError && (
-                        <p className="text-xs text-red-600">{calibrateError}</p>
-                      )}
-                    </div>
-                  </StepCard>
-                )}
-
-                {/* Step 2: Run Detection */}
-                {currentStep === 2 && !detectionDone && (
-                  <StepCard
-                    stepNumber={2}
-                    title="Run Detection"
-                    status={getStepStatus(2)}
-                  >
-                    <div className="space-y-3">
-                      <button
-                        onClick={() => handleRunDetection()}
-                        disabled={!calStore.umPerPixel || detectionJob?.status === 'running'}
-                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors text-sm disabled:bg-gray-300 disabled:cursor-not-allowed"
-                      >
-                        {detectionJob?.status === 'running' ? 'Running...' : 'Run Detection'}
-                      </button>
-
-                      <button
-                        onClick={() => setModalOpen('advanced-detection')}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium transition-colors text-sm flex items-center justify-center gap-2"
-                      >
-                        <Settings2 className="w-4 h-4" />
-                        Advanced Settings
-                      </button>
-
-                      {detectionJob && (
-                        <JobProgress job={detectionJob} />
-                      )}
-
-                      {detectionError && (
-                        <p className="text-xs text-red-600">{detectionError}</p>
-                      )}
-                    </div>
-                  </StepCard>
-                )}
-
-                {/* Step 2: Path Decision (after detection completes) */}
-                {currentStep === 2 && detectionDone && (
-                  <PathDecisionCard
-                    detectionCount={refinement.boxes.length}
-                    onSelectPath={handlePathDecision}
-                  />
-                )}
-
-                {/* Step 3: Edit Detections */}
-                {currentStep === 3 && (
-                  <StepCard
-                    stepNumber={3}
-                    title="Edit Detections"
-                    status={getStepStatus(3)}
-                  >
-                    <div className="space-y-3">
-                      <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                        <p className="text-xs text-blue-800">
-                          Use the floating toolbar on the viewer to add, remove, or toggle boxes.
-                          <br />
-                          <br />
-                          <strong>Shortcuts:</strong> S (select), D (draw), H (hide/show), Del
-                          (remove)
-                        </p>
-                      </div>
-
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-gray-600">
-                          {refinement.boxes.filter((b) => b.status !== 'rejected').length} boxes
-                        </span>
-                        <span className="text-gray-600">
-                          {refinement.boxes.filter((b) => b.status === 'added').length} added
-                        </span>
-                      </div>
-
-                      <button
-                        onClick={handleDoneEditing}
-                        className="w-full px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium transition-colors text-sm"
-                      >
-                        Done Editing
-                      </button>
-
-                      {role === 'admin' && refinement.annotationsSaved && (
-                        <button
-                          onClick={() => setModalOpen('finetune')}
-                          className="w-full px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium transition-colors text-sm"
-                        >
-                          Fine-Tune Model
-                        </button>
-                      )}
-
-                      {refineSaveError && (
-                        <p className="text-xs text-red-600">{refineSaveError}</p>
-                      )}
-                    </div>
-                  </StepCard>
-                )}
-
-                {/* Step 4: Measure Organisms */}
-                {currentStep === 4 && (
-                  <StepCard
-                    stepNumber={4}
-                    title="Measure Organisms"
-                    status={getStepStatus(4)}
-                  >
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Measurement Method
-                        </label>
-                        <div className="space-y-2">
-                          <label className="flex items-center gap-2 p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                            <input
-                              type="radio"
-                              value="fast"
-                              checked={measureMethod === 'fast'}
-                              onChange={(e) =>
-                                setMeasureMethod(e.target.value as 'fast' | 'sam')
-                              }
-                              className="text-blue-600"
-                            />
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-gray-900">
-                                Fast Ellipse
-                              </div>
-                              <div className="text-xs text-gray-600">
-                                ~178 org/sec, recommended
-                              </div>
-                            </div>
-                          </label>
-                          <label className="flex items-center gap-2 p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                            <input
-                              type="radio"
-                              value="sam"
-                              checked={measureMethod === 'sam'}
-                              onChange={(e) =>
-                                setMeasureMethod(e.target.value as 'fast' | 'sam')
-                              }
-                              className="text-blue-600"
-                            />
-                            <div className="flex-1">
-                              <div className="text-sm font-medium text-gray-900">
-                                SAM Contours
-                              </div>
-                              <div className="text-xs text-gray-600">
-                                ~1 org/sec, more accurate
-                              </div>
-                            </div>
-                          </label>
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={handleRunMeasurement}
-                        disabled={
-                          !detectionDone ||
-                          !calStore.umPerPixel ||
-                          measureJob?.status === 'running'
-                        }
-                        className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition-colors text-sm disabled:bg-gray-300 disabled:cursor-not-allowed"
-                      >
-                        {measureJob?.status === 'running'
-                          ? 'Running...'
-                          : 'Run Measurement'}
-                      </button>
-
-                      {measureJob && <JobProgress job={measureJob} />}
-
-                      {measureError && <p className="text-xs text-red-600">{measureError}</p>}
-
-                      {measurementDone && csvData && (
-                        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                          <p className="text-xs text-green-800">
-                            <strong>Complete!</strong> Measured {csvData.length} organisms.
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </StepCard>
-                )}
-
-                {/* Reset button */}
-                <button
-                  onClick={handleReset}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium transition-colors text-sm flex items-center justify-center gap-2"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  Reset Workspace
-                </button>
-              </div>
+              <WorkspaceSidebar
+                imageFilename={image.filename}
+                imageWidth={image.width}
+                imageHeight={image.height}
+                umPerPixel={umPerPixel}
+                setUmPerPixel={setUmPerPixel}
+                calibrated={calStore.umPerPixel != null}
+                detectionDone={detectionDone}
+                detectionJob={detectionJob ?? null}
+                detectionError={detectionError}
+                onRunDetection={() => handleRunDetection()}
+                onAdvancedSettings={() => setModalOpen('advanced-detection')}
+                annotationsSaved={refinement.annotationsSaved}
+                boxCount={refinement.boxes.length}
+                measurementDone={measurementDone}
+                measureJob={measureJob ?? null}
+                measureError={measureError}
+                measureMethod={measureMethod}
+                setMeasureMethod={setMeasureMethod}
+                onRunMeasurement={handleRunMeasurement}
+                csvDataLength={csvData?.length ?? 0}
+                onViewResults={() => setShowMeasurementModal(true)}
+                onReset={handleReset}
+              />
             </aside>
           )}
 
           {/* ── Main Content ── */}
-          <div ref={mainAreaRef} className="flex-1 flex flex-col overflow-hidden">
-            {/* Viewer Toolbar */}
-            <ViewerToolbar
-              overlayMode={overlayMode}
-              onOverlayChange={setOverlayMode}
-              availableOverlays={{
-                boxes: detectionDone,
-                contours: hasSamOverlay,
-              }}
-              onExport={handleExport}
-            />
-
-            {/* Viewer & Table Split */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {/* Viewer */}
-              <div style={{ height: `${splitPercent}%` }} className="relative overflow-hidden">
-                <ImageViewer
-                  src={viewerSrc}
-                  alt={image.filename}
-                  className="h-full"
-                  onImageClick={handleImageClick}
-                  transformOverlay={showBboxOverlay && refineMode ? (
-                    <BboxOverlay
-                      boxes={refinement.boxes}
-                      imageWidth={image.width}
-                      imageHeight={image.height}
-                      selectedId={refinement.selectedId}
-                      onBoxClick={refinement.selectBox}
-                      drawingBox={refinement.drawingBox}
-                      mode={drawMode ? 'draw' : 'review'}
-                      onDrawStart={refinement.startDraw}
-                      onDrawMove={refinement.updateDraw}
-                      onDrawEnd={refinement.commitDraw}
-                    />
-                  ) : undefined}
-                  disablePan={refineMode && drawMode}
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            {/* Toolbar row */}
+            <div className="flex items-center border-b">
+              <div className="flex-1">
+                <ViewerToolbar
+                  overlayMode={overlayMode}
+                  onOverlayChange={setOverlayMode}
+                  availableOverlays={{
+                    boxes: detectionDone,
+                    contours: hasSamOverlay,
+                  }}
+                  onExport={handleExport}
+                  measurementDone={measurementDone}
                 />
-
-                {/* Floating toolbar for edit mode */}
-                {refineMode && (
-                  <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-0.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5">
-                    {(['review', 'draw'] as const).map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => {
-                          setDrawMode(m === 'draw')
-                          refinement.selectBox(null)
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
-                          (m === 'draw') === drawMode
-                            ? 'bg-amber-500 text-white'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        <span>{m === 'review' ? 'Select' : 'Draw'}</span>
-                        <kbd className={`text-[9px] px-1 py-0.5 rounded border font-mono ${
-                          (m === 'draw') === drawMode
-                            ? 'border-amber-300 bg-amber-400/40'
-                            : 'border-gray-200 bg-gray-50 text-gray-400'
-                        }`}>
-                          {m === 'review' ? 'S' : 'D'}
-                        </kbd>
-                      </button>
-                    ))}
-
-                    <div className="border-t border-gray-200 my-0.5" />
-
-                    <button
-                      onClick={() => setOverlayMode((prev) => prev === 'raw' ? 'boxes' : 'raw')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
-                        overlayMode === 'boxes' || overlayMode === 'both'
-                          ? 'text-gray-600 hover:bg-gray-100'
-                          : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
-                      }`}
-                    >
-                      <span>{overlayMode === 'boxes' || overlayMode === 'both' ? 'Hide' : 'Show'}</span>
-                      <kbd className="text-[9px] px-1 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-400 font-mono">
-                        H
-                      </kbd>
-                    </button>
-                  </div>
-                )}
               </div>
+              {siblingImages.length > 1 && (
+                <div className="flex items-center gap-0.5 px-2 border-l shrink-0">
+                  <button
+                    onClick={handlePrev}
+                    disabled={!hasPrev}
+                    title="Previous image (←)"
+                    className="p-1 rounded text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-default transition-colors"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+                  <span className="text-xs text-gray-400 tabular-nums px-0.5">
+                    {currentSiblingIndex + 1}/{siblingImages.length}
+                  </span>
+                  <button
+                    onClick={handleNext}
+                    disabled={!hasNext}
+                    title="Next image (→)"
+                    className="p-1 rounded text-gray-500 hover:text-gray-800 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-default transition-colors"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              )}
+              {measurementDone && (
+                <button
+                  onClick={() => setShowMeasurementModal(true)}
+                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 mr-3 border border-gray-300 rounded-lg bg-white hover:bg-gray-50 text-gray-700 font-medium transition-colors shrink-0"
+                >
+                  <Table2 size={14} />
+                  View Results
+                </button>
+              )}
+            </div>
 
-              {/* Split handle */}
-              <div
-                onPointerDown={onSplitPointerDown}
-                className="h-1 bg-gray-200 cursor-ns-resize hover:bg-blue-400 transition-colors"
+            {/* Image viewer fills remaining space */}
+            <div className="flex-1 min-h-0 relative overflow-hidden">
+              <ImageViewer
+                src={viewerSrc}
+                alt={image.filename}
+                className="h-full"
+                transformOverlay={showBboxOverlay ? (
+                  <BboxOverlay
+                    boxes={refinement.boxes}
+                    imageWidth={image.width}
+                    imageHeight={image.height}
+                    selectedId={refinement.selectedId}
+                    onBoxClick={refineMode && editTool === 'reject'
+                      ? (id) => {
+                          const box = refinement.boxes.find((b) => b.id === id)
+                          if (box?.status === 'added') refinement.removeBox(id)
+                          else refinement.toggleBox(id)
+                        }
+                      : refinement.selectBox}
+                    drawingBox={refinement.drawingBox}
+                    mode={refineMode && editTool === 'draw' ? 'draw' : 'review'}
+                    onDrawStart={refineMode ? refinement.startDraw : undefined}
+                    onDrawMove={refineMode ? refinement.updateDraw : undefined}
+                    onDrawEnd={refineMode ? refinement.commitDraw : undefined}
+                  />
+                ) : undefined}
+                disablePan={refineMode && editTool === 'draw'}
               />
 
-              {/* Measurement Table */}
-              <div
-                style={{ height: `${100 - splitPercent}%` }}
-                className="overflow-hidden border-t"
-              >
-                <MeasurementTable
-                  data={csvData ?? []}
-                  onRowClick={handleRowClick}
-                  selectedIndex={selectedMeasurementIndex}
-                />
-              </div>
+              {/* Floating annotation toolbar — always visible once detection is done */}
+              {detectionDone && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-0.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5">
+                  {refineMode ? (
+                    <>
+                      {/* Edit tools */}
+                      {([
+                        { tool: 'select', label: 'Select', key: 'S', Icon: MousePointer2 },
+                        { tool: 'reject', label: 'Invalid', key: 'R', Icon: XCircle },
+                        { tool: 'draw',   label: 'Draw',   key: 'D', Icon: Square },
+                      ] as const).map(({ tool, label, key, Icon }) => (
+                        <button
+                          key={tool}
+                          title={`${label} (${key})`}
+                          onClick={() => {
+                            setEditTool(tool)
+                            refinement.selectBox(null)
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
+                            editTool === tool
+                              ? tool === 'reject'
+                                ? 'bg-red-500 text-white'
+                                : 'bg-amber-500 text-white'
+                              : 'text-gray-600 hover:bg-gray-100'
+                          }`}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <Icon size={12} />
+                            {label}
+                          </span>
+                          <kbd className={`text-[9px] px-1 py-0.5 rounded border font-mono ${
+                            editTool === tool
+                              ? tool === 'reject'
+                                ? 'border-red-300 bg-red-400/40'
+                                : 'border-amber-300 bg-amber-400/40'
+                              : 'border-gray-200 bg-gray-50 text-gray-400'
+                          }`}>
+                            {key}
+                          </kbd>
+                        </button>
+                      ))}
+
+                      <div className="border-t border-gray-200 my-0.5" />
+
+                      {/* Hide/Show toggle */}
+                      <button
+                        onClick={() => setOverlayMode((prev) => {
+                          if (prev !== 'raw') { prevOverlayModeRef.current = prev; return 'raw' }
+                          return prevOverlayModeRef.current
+                        })}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center justify-between gap-3 ${
+                          overlayMode !== 'raw'
+                            ? 'text-gray-600 hover:bg-gray-100'
+                            : 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                        }`}
+                      >
+                        <span>{overlayMode !== 'raw' ? 'Hide' : 'Show'}</span>
+                        <kbd className={`text-[9px] px-1 py-0.5 rounded border font-mono ${
+                          overlayMode === 'raw' ? 'border-amber-300 bg-amber-400/40' : 'border-gray-200 bg-gray-50 text-gray-400'
+                        }`}>
+                          H
+                        </kbd>
+                      </button>
+
+                      <div className="border-t border-gray-200 my-0.5" />
+
+                      {/* Counts */}
+                      <div className="flex items-center justify-between gap-2 px-2 py-0.5 text-[10px]">
+                        <span className="text-green-600">{refinement.acceptedCount} ✓</span>
+                        <span className="text-red-500">{refinement.rejectedCount} ✗</span>
+                        <span className="text-blue-600">{refinement.addedCount} +</span>
+                      </div>
+
+                      <div className="border-t border-gray-200 my-0.5" />
+
+                      {/* Save & Exit */}
+                      <button
+                        onClick={handleDoneEditing}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium bg-green-600 text-white hover:bg-green-700 transition-colors flex items-center gap-1.5"
+                      >
+                        <CheckCircle2 size={12} />
+                        Save
+                      </button>
+
+                      {/* Fine-tune (admin only) */}
+                      {role === 'admin' && refinement.annotationsSaved && (
+                        <button
+                          onClick={() => setModalOpen('finetune')}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+                        >
+                          Fine-Tune
+                        </button>
+                      )}
+
+                      {/* Save error */}
+                      {refineSaveError && (
+                        <p className="text-[10px] text-red-600 px-2 max-w-[140px] leading-tight">{refineSaveError}</p>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {/* Entry state */}
+                      {refinement.annotationsSaved && (
+                        <div className="flex items-center gap-1 text-[10px] text-green-700 px-2 py-1">
+                          <CheckCircle2 size={10} />
+                          Annotations saved
+                        </div>
+                      )}
+                      <button
+                        onClick={() => setRefineMode(true)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors flex items-center gap-1.5"
+                      >
+                        <Pencil size={12} />
+                        {refinement.annotationsSaved ? 'Edit Annotations' : 'Edit Detections'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
       {/* ── Modals ── */}
-      <ManualCalibrationModal
-        isOpen={modalOpen === 'manual-calibration'}
-        onClose={() => setModalOpen(null)}
-        onComplete={handleManualCalibrationComplete}
-        imageWidth={image?.width ?? 0}
-        imageHeight={image?.height ?? 0}
-      />
-
       <AdvancedDetectionModal
         isOpen={modalOpen === 'advanced-detection'}
         onClose={() => setModalOpen(null)}
@@ -1041,16 +803,14 @@ export default function WorkspacePage() {
         detectionJobId={detectionJobId ?? undefined}
       />
 
-      <NavigationWarningDialog
-        isOpen={showNavigationWarning}
-        onClose={() => {
-          setShowNavigationWarning(false)
-          setNavigationTarget(null)
-        }}
-        onConfirm={handleConfirmNavigation}
-        targetStep={navigationTarget ?? 1}
-        hasDetections={detectionDone}
-        hasMeasurements={measurementDone}
+      <MeasurementModal
+        isOpen={showMeasurementModal}
+        onClose={() => setShowMeasurementModal(false)}
+        data={csvData ?? []}
+        selectedIndex={selectedMeasurementIndex}
+        onRowClick={handleRowClick}
+        onExport={(fmt) => handleExport(fmt)}
+        measurementDone={measurementDone}
       />
     </div>
   )

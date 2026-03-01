@@ -19,6 +19,7 @@ class JobType(str, Enum):
     CALIBRATION = "calibration"
     BATCH = "batch"
     BATCH_MEASURE = "batch_measure"
+    BATCH_PROCESS = "batch_process"
     FINETUNE = "finetune"
 
 

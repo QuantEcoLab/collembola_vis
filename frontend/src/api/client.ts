@@ -242,6 +242,15 @@ export const runBatchMeasurement = (
     body: JSON.stringify(params),
   })
 
+export const runBatchProcess = (
+  projectId: string,
+  params: { um_per_pixel: number; conf?: number; device?: string },
+) =>
+  request<{ job_id: string; status: string }>(`/api/projects/${projectId}/process`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+
 export const updateProjectImageJobs = (
   projectId: string,
   imageId: string,
@@ -254,3 +263,45 @@ export const updateProjectImageJobs = (
 
 export const projectAnnotationsExportUrl = (projectId: string, format: 'json' | 'csv') =>
   `${BASE}/api/projects/${projectId}/annotations/export?format=${format}`
+
+export const listProjectFolders = (projectId: string) =>
+  request<string[]>(`/api/projects/${projectId}/folders`)
+
+export const setImageFolder = (projectId: string, imageId: string, folder: string | null) =>
+  request<{ ok: boolean }>(`/api/projects/${projectId}/images/${imageId}/folder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ folder }),
+  })
+
+export const deleteProjectFolder = (projectId: string, folderName: string) =>
+  request<{ ok: boolean }>(`/api/projects/${projectId}/folders/${encodeURIComponent(folderName)}`, {
+    method: 'DELETE',
+  })
+
+export const renameProjectFolder = (projectId: string, oldName: string, newName: string) =>
+  request<{ ok: boolean }>(`/api/projects/${projectId}/folders/${encodeURIComponent(oldName)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ new_name: newName }),
+  })
+
+/** Fetch all measurement CSVs as a ZIP and trigger a browser download. */
+export async function downloadProjectResults(projectId: string, projectName: string): Promise<void> {
+  const res = await fetch(`${BASE}/api/projects/${projectId}/results/download`, {
+    headers: { ...authHeaders() },
+  })
+  if (res.status === 401) handle401()
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const safe = projectName.replace(/[^a-zA-Z0-9-_]/g, '_')
+  a.download = `${safe}_measurements.zip`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}

@@ -83,7 +83,7 @@ export function ModalDialog({
         </div>
 
         {/* Body - scrollable if content overflows */}
-        <div className="overflow-y-auto flex-1">
+        <div className="overflow-y-auto flex-1 min-h-0">
           {children}
         </div>
       </div>

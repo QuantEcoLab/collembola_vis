@@ -250,7 +250,10 @@ def measure_organisms_fast(image_path: Path,
         'confidence', 'class',
         'method'
     ]
-    df_meas = df_meas[cols_order]
+    if df_meas.empty:
+        df_meas = pd.DataFrame(columns=cols_order)
+    else:
+        df_meas = df_meas[cols_order]
 
     if progress_callback:
         progress_callback(1.0, f"Done — {len(df_meas)} organisms measured")

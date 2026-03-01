@@ -85,8 +85,8 @@ def run_batch_measurement(job: Job, progress_callback) -> dict[str, Any]:
                 det_job_id = entry["detection_job_id"]
                 detections_csv = settings.outputs_dir / det_job_id / f"{image_stem}_detections.csv"
 
-            sub_job_id = uuid.uuid4().hex[:12]
-            output_dir = settings.outputs_dir / sub_job_id
+            meas_job_id = uuid.uuid4().hex[:12]
+            output_dir = settings.outputs_dir / meas_job_id
             output_dir.mkdir(parents=True, exist_ok=True)
             output_csv = output_dir / f"{image_stem}_measurements.csv"
 
@@ -111,7 +111,9 @@ def run_batch_measurement(job: Job, progress_callback) -> dict[str, Any]:
                     progress_callback=None,
                 )
 
-            # Register as a completed MEASUREMENT job so workspace can load it
+            # Register as a completed MEASUREMENT job so workspace can load it.
+            # Pass meas_job_id so the job ID matches the output directory —
+            # the workspace loads CSVs via outputFileUrl(job.id, filename).
             sub_result: dict[str, Any] = {
                 "num_organisms": len(df),
                 "csv_path": str(output_csv),
@@ -130,6 +132,7 @@ def run_batch_measurement(job: Job, progress_callback) -> dict[str, Any]:
                     "method": method,
                 },
                 result=sub_result,
+                job_id=meas_job_id,
             )
 
             db_projects.set_measurement_job(project_id, image_id, sub_job.id)

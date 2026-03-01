@@ -38,7 +38,7 @@ export default function FineTunePanel({
       .then((ms) => {
         setModels(ms)
         if (ftJob?.result?.model_path) {
-          setBaseModel(ftJob.result.model_path)
+          setBaseModel(ftJob.result.model_path as string)
         } else if (ms.length > 0) {
           setBaseModel(ms[0].path)
         }
@@ -137,13 +137,13 @@ export default function FineTunePanel({
       {ftDone && ftJob.result && (
         <div className="rounded-lg bg-violet-50 border border-violet-200 p-2.5 text-xs text-violet-800 space-y-1">
           <p className="font-medium">✓ Fine-tune complete</p>
-          <p className="truncate">{ftJob.result.model_name}</p>
+          <p className="truncate">{ftJob.result.model_name as string}</p>
           {ftJob.result.map50 != null && (
-            <p>mAP50: {(ftJob.result.map50 * 100).toFixed(1)}%</p>
+            <p>mAP50: {((ftJob.result.map50 as number) * 100).toFixed(1)}%</p>
           )}
           {onModelSelected && (
             <button
-              onClick={() => onModelSelected(ftJob.result.model_path)}
+              onClick={() => onModelSelected(ftJob.result.model_path as string)}
               className="mt-1 text-violet-700 underline hover:text-violet-900"
             >
               Use this model

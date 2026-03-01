@@ -11,6 +11,7 @@ interface ViewerToolbarProps {
     contours: boolean;
   };
   onExport?: (format: 'image' | 'csv' | 'excel') => void;
+  measurementDone?: boolean;
 }
 
 export function ViewerToolbar({
@@ -18,6 +19,7 @@ export function ViewerToolbar({
   onOverlayChange,
   availableOverlays,
   onExport,
+  measurementDone = false,
 }: ViewerToolbarProps) {
   const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
 
@@ -85,7 +87,7 @@ export function ViewerToolbar({
                     onExport('csv');
                     setExportMenuOpen(false);
                   }}
-                  disabled={!availableOverlays.boxes}
+                  disabled={!measurementDone}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <Download className="w-4 h-4" />
@@ -96,7 +98,7 @@ export function ViewerToolbar({
                     onExport('excel');
                     setExportMenuOpen(false);
                   }}
-                  disabled={!availableOverlays.boxes}
+                  disabled={!measurementDone}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <Download className="w-4 h-4" />
