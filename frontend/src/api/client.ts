@@ -31,7 +31,7 @@ function authHeaders(): Record<string, string> {
 
 function handle401(): never {
   localStorage.removeItem('auth')
-  window.location.href = '/login'
+  window.location.href = `${BASE}/login`
   throw new Error('Unauthorized')
 }
 

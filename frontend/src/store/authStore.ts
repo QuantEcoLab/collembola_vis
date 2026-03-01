@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { useProjectStore } from './projectStore'
 
 interface AuthState {
   token: string | null
@@ -16,7 +17,10 @@ export const useAuthStore = create<AuthState>()(
       role: null,
       username: null,
       login: (token, role, username) => set({ token, role, username: username ?? null }),
-      logout: () => set({ token: null, role: null, username: null }),
+      logout: () => {
+        useProjectStore.getState().setCurrentProject(null, null)
+        set({ token: null, role: null, username: null })
+      },
     }),
     { name: 'auth' },
   ),

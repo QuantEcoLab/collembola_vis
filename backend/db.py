@@ -41,8 +41,11 @@ def init_db() -> None:
         # Migration: add image_id column to existing tables that don't have it
         try:
             conn.execute("ALTER TABLE community_detections ADD COLUMN image_id TEXT")
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # Column already exists
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_community_username ON community_detections(username)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_community_image_id ON community_detections(image_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_community_submitted_at ON community_detections(submitted_at)")
         conn.commit()
 
 

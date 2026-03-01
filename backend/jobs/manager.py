@@ -1,6 +1,7 @@
 """Multi-worker job queue with persistent state and background processing."""
 
 import json
+import logging
 import threading
 import traceback
 import uuid
@@ -11,6 +12,8 @@ from queue import Queue, Empty
 from typing import Any
 
 from .models import Job, JobStatus, JobType
+
+logger = logging.getLogger(__name__)
 
 
 class JobManager:
@@ -24,6 +27,7 @@ class JobManager:
     """
 
     MAX_WORKERS = 5  # Maximum concurrent jobs
+    MAX_COMPLETED_JOBS = 500  # Maximum completed/failed jobs kept in memory
 
     def __init__(self):
         self._jobs: dict[str, Job] = {}
@@ -80,7 +84,7 @@ class JobManager:
                     self._queue.put(job_id)
                     self._persist(job)
         except Exception as e:
-            print(f"Warning: Failed to load queue state: {e}")
+            logger.warning("Failed to load queue state: %s", e)
 
     def _save_queue_state(self) -> None:
         """Persist current queue state to disk."""
@@ -96,7 +100,7 @@ class JobManager:
             data = {"pending_jobs": pending_ids, "saved_at": datetime.now().isoformat()}
             self._get_queue_file().write_text(json.dumps(data, indent=2))
         except Exception as e:
-            print(f"Warning: Failed to save queue state: {e}")
+            logger.warning("Failed to save queue state: %s", e)
 
     def submit(self, job_type: JobType, params: dict[str, Any] | None = None) -> Job:
         """Submit a new job and return it."""
@@ -211,7 +215,7 @@ class JobManager:
         Args:
             worker_id: Unique identifier for this worker thread (0 to MAX_WORKERS-1)
         """
-        print(f"JobWorker-{worker_id} started")
+        logger.info("JobWorker-%d started", worker_id)
         
         while not self._shutdown:
             try:
@@ -232,6 +236,7 @@ class JobManager:
                 self._persist(job)
                 self._notify(job)
                 self._save_queue_state()
+                self._evict_old_jobs()
                 continue
 
             # Track running count for monitoring
@@ -251,28 +256,46 @@ class JobManager:
                     self._notify(job)
 
             try:
-                print(f"JobWorker-{worker_id} executing {job.type.value} job {job.id}")
+                logger.info("JobWorker-%d executing %s job %s", worker_id, job.type.value, job.id)
                 result = handler(job, progress_callback)
                 job.status = JobStatus.COMPLETED
                 job.progress = 1.0
                 job.result = result or {}
                 job.completed_at = datetime.now()
-                print(f"JobWorker-{worker_id} completed job {job.id}")
+                logger.info("JobWorker-%d completed job %s", worker_id, job.id)
             except Exception as e:
                 job.status = JobStatus.FAILED
                 job.error = f"{type(e).__name__}: {e}"
                 job.completed_at = datetime.now()
-                print(f"JobWorker-{worker_id} failed job {job.id}: {e}")
+                logger.error("JobWorker-%d failed job %s: %s", worker_id, job.id, e)
                 traceback.print_exc()
 
             self._persist(job)
             self._notify(job)
             self._save_queue_state()
-            
+            self._evict_old_jobs()
+
             with self._lock:
                 self._running_count -= 1
-        
-        print(f"JobWorker-{worker_id} shutting down")
+
+        logger.info("JobWorker-%d shutting down", worker_id)
+
+    def _evict_old_jobs(self) -> None:
+        """Remove oldest completed/failed jobs from memory beyond MAX_COMPLETED_JOBS.
+
+        Disk files are kept intact for recovery via _load_from_disk.
+        """
+        with self._lock:
+            done_jobs = [
+                j for j in self._jobs.values()
+                if j.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+            ]
+            if len(done_jobs) <= self.MAX_COMPLETED_JOBS:
+                return
+            done_jobs.sort(key=lambda j: j.completed_at or datetime.min)
+            to_remove = done_jobs[:len(done_jobs) - self.MAX_COMPLETED_JOBS]
+            for job in to_remove:
+                self._jobs.pop(job.id, None)
 
     def get_stats(self) -> dict[str, Any]:
         """Get current job queue statistics."""

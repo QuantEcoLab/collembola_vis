@@ -10,6 +10,8 @@ from backend.services.image import delete_image, get_image_info, list_images, re
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(get_current_user)])
 
+MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500 MB
+
 
 @router.post("/upload")
 async def upload_image(file: UploadFile):
@@ -20,6 +22,8 @@ async def upload_image(file: UploadFile):
     content = await file.read()
     if len(content) == 0:
         raise HTTPException(400, "Empty file")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "File too large (max 500 MB)")
 
     result = save_upload(file.filename, content)
     return result

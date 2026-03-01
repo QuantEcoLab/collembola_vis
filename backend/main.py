@@ -1,5 +1,6 @@
 """FastAPI application for the Collembola Detection Pipeline web UI."""
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -44,17 +45,22 @@ async def lifespan(app: FastAPI):
     yield
 
 
+_root_path = os.environ.get("ROOT_PATH", "/collembola")
+_cors_origins = os.environ.get(
+    "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+).split(",")
+
 app = FastAPI(
     title="Collembola Detection Pipeline",
     version="1.0.0",
     lifespan=lifespan,
-    root_path="/collembola",
+    root_path=_root_path,
 )
 
 # CORS — allow Vite dev server in development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

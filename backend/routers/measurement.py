@@ -2,6 +2,7 @@
 
 import csv
 import json
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -35,7 +36,7 @@ def _annotations_to_csv(image_id: str) -> Path:
     data = json.loads(ann_path.read_text())
     boxes = [b for b in data.get("boxes", []) if b.get("status") != "rejected"]
 
-    out_path = settings.annotations_dir / f"{image_id}_for_measurement.csv"
+    out_path = settings.annotations_dir / f"{image_id}_{uuid.uuid4().hex[:8]}_for_measurement.csv"
     with open(out_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["x1", "y1", "x2", "y2", "width", "height", "confidence", "class"])
         writer.writeheader()
@@ -65,6 +66,9 @@ async def run_measurement(req: MeasurementRequest):
         except FileNotFoundError as e:
             raise HTTPException(404, str(e))
     else:
+        csv_path = Path(req.detections_csv).resolve()
+        if not csv_path.is_relative_to(settings.outputs_dir.resolve()):
+            raise HTTPException(400, "Invalid detections path")
         detections_csv = req.detections_csv
 
     params = {

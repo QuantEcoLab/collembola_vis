@@ -52,8 +52,12 @@ def init_project_db() -> None:
         try:
             conn.execute("ALTER TABLE project_images ADD COLUMN folder TEXT DEFAULT NULL")
             conn.commit()
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # Column already exists
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_proj_images_project_id ON project_images(project_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_proj_images_image_id ON project_images(image_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_projects_created_by ON projects(created_by)")
+        conn.commit()
 
 
 def _now() -> str:
@@ -99,7 +103,7 @@ def get_project(project_id: str) -> dict[str, Any] | None:
             return None
         project = dict(row)
         images = conn.execute(
-            "SELECT * FROM project_images WHERE project_id = ? ORDER BY added_at ASC",
+            "SELECT * FROM project_images WHERE project_id = ? ORDER BY filename ASC",
             (project_id,),
         ).fetchall()
         project["images"] = [dict(i) for i in images]

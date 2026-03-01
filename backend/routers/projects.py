@@ -253,9 +253,7 @@ async def batch_detect(
     req: BatchDetectRequest,
     username: str = Depends(get_current_user),
 ):
-    project = db_projects.get_project(project_id)
-    if project is None:
-        raise HTTPException(404, "Project not found")
+    project = _require_owner(project_id, username)
     images = project.get("images", [])
     if not images:
         raise HTTPException(400, "Project has no images")
@@ -356,9 +354,7 @@ async def batch_measure(
     req: BatchMeasureRequest,
     username: str = Depends(get_current_user),
 ):
-    project = db_projects.get_project(project_id)
-    if project is None:
-        raise HTTPException(404, "Project not found")
+    project = _require_owner(project_id, username)
 
     images = [_enrich_image(img) for img in project["images"]]
     measurable = [img for img in images if img["detection_job_id"] or img["has_annotation"]]

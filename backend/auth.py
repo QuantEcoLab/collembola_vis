@@ -1,5 +1,8 @@
 """Authentication: JWT login with role-based access control."""
 
+import json
+import logging
+import os
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -8,15 +11,21 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
 # ── Config ────────────────────────────────────────────────────────────────────
-_SECRET_KEY = "collembola-vis-secret-key-change-in-production-2024"
+_DEFAULT_SECRET_KEY = "collembola-vis-secret-key-change-in-production-2024"
+_SECRET_KEY = os.environ.get("AUTH_SECRET_KEY", _DEFAULT_SECRET_KEY)
 _ALGORITHM = "HS256"
 _TOKEN_EXPIRE_DAYS = 7
+
+if _SECRET_KEY == _DEFAULT_SECRET_KEY:
+    logger.warning("WARNING: using default AUTH_SECRET_KEY — set AUTH_SECRET_KEY env var in production")
 
 # ── Hardcoded users (password stored as bcrypt hash) ─────────────────────────
 # user1 / user12345  → role: user
 # admin / admin12345 → role: admin
-_USERS: dict[str, dict] = {
+_DEFAULT_USERS: dict[str, dict] = {
     "user1": {
         "hash": b"$2b$12$YAIbQEfmn5d0IXDdGg7QzOUzrMYknVwyYuXIwrauZMrMn9NApc6Si",
         "role": "user",
@@ -26,6 +35,17 @@ _USERS: dict[str, dict] = {
         "role": "admin",
     },
 }
+
+_auth_users_env = os.environ.get("AUTH_USERS")
+if _auth_users_env:
+    _loaded = json.loads(_auth_users_env)
+    # Ensure hash values are bytes (JSON stores them as strings)
+    _USERS: dict[str, dict] = {
+        u: {**d, "hash": d["hash"].encode() if isinstance(d["hash"], str) else d["hash"]}
+        for u, d in _loaded.items()
+    }
+else:
+    _USERS = _DEFAULT_USERS
 
 
 def _verify_password(plain: str, hashed: bytes) -> bool:
