@@ -101,7 +101,10 @@ export default function ImageViewer({
   const pan = useRef({ active: false, moved: false, ox: 0, oy: 0 })
 
   const onPointerDown = useCallback((e: React.PointerEvent) => {
-    if (disablePan || e.button !== 0) return
+    if (disablePan || e.button !== 0) {
+      pan.current.moved = false
+      return
+    }
     pan.current = { active: true, moved: false, ox: e.clientX, oy: e.clientY }
     e.currentTarget.setPointerCapture(e.pointerId)
     containerRef.current!.style.cursor = 'grabbing'

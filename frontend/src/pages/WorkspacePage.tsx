@@ -12,6 +12,8 @@ import { WorkspaceSidebar } from '../components/WorkspaceSidebar'
 import {
   runDetection,
   runMeasurement,
+  manualCalibrate,
+  getCalibration,
   imageUrl,
   outputFileUrl,
   updateProjectImageJobs,
@@ -27,6 +29,7 @@ import { useProjectStore } from '../store/projectStore'
 import type { ImageInfo, ProjectImage } from '../api/types'
 
 type ModalType = 'advanced-detection' | 'finetune' | null
+type Point = [number, number]
 
 const basename = (path: string) => path.split(/[\\/]/).pop()
 
@@ -51,9 +54,14 @@ export default function WorkspacePage() {
   // ── Calibration ─────────────────────────────────────────────────────
   const [umPerPixel, setUmPerPixelState] = useState<number>(calStore.umPerPixel ?? 8.57)
   const setUmPerPixel = (v: number) => {
+    if (!Number.isFinite(v)) return
     setUmPerPixelState(v)
     calStore.setUmManual(v)
   }
+  const [calibrationMode, setCalibrationMode] = useState(false)
+  const [calibrationPoints, setCalibrationPoints] = useState<Point[]>([])
+  const [calibrationError, setCalibrationError] = useState<string | null>(null)
+  const [calibrationMessage, setCalibrationMessage] = useState<string | null>(null)
   // ── Detection ───────────────────────────────────────────────────────
   const [conf] = useState(0.6)
   const [tileSize] = useState(1280)
@@ -111,6 +119,22 @@ export default function WorkspacePage() {
       .catch(() => {})
   }, [currentProjectId])
 
+  useEffect(() => {
+    if (!image) return
+    getCalibration(image.image_id)
+      .then((cal) => {
+        if (cal.um_per_pixel == null) return
+        setUmPerPixelState(cal.um_per_pixel)
+        calStore.setCalibration(
+          cal.um_per_pixel,
+          cal.calibration_id ?? '',
+          cal.method,
+          cal.confidence,
+        )
+      })
+      .catch(() => {})
+  }, [image?.image_id])
+
   const siblingImages = useMemo(() => {
     if (!image || projectImages.length === 0) return []
     const currentEntry = projectImages.find((pi) => pi.image_id === image.image_id)
@@ -145,7 +169,7 @@ export default function WorkspacePage() {
   }, [image, overlayMode, samOverlayUrl])
 
   // Show bbox overlay when mode is 'boxes' or 'both' and there are boxes to show
-  const showBboxOverlay = (overlayMode === 'boxes' || overlayMode === 'both') && refinement.boxes.length > 0
+  const showBboxOverlay = !calibrationMode && (overlayMode === 'boxes' || overlayMode === 'both') && refinement.boxes.length > 0
 
   // Index of selected box within non-added boxes → maps to measurement CSV row
   const selectedMeasurementIndex = useMemo(() => {
@@ -321,6 +345,59 @@ export default function WorkspacePage() {
   }, [editTool, refineMode, refinement, handlePrev, handleNext])
 
   // ── Handlers ────────────────────────────────────────────────────────
+
+  const handleStartCalibration = () => {
+    setCalibrationMode(true)
+    setCalibrationPoints([])
+    setCalibrationError(null)
+    setCalibrationMessage('Click the 0 mm mark, then the 10 mm mark.')
+    setRefineMode(false)
+    setEditTool('select')
+  }
+
+  const handleCancelCalibration = () => {
+    setCalibrationMode(false)
+    setCalibrationPoints([])
+    setCalibrationError(null)
+    setCalibrationMessage(null)
+  }
+
+  const handleCalibrationClick = async (x: number, y: number) => {
+    if (!image || !calibrationMode) return
+
+    const point: Point = [x, y]
+    const nextPoints = [...calibrationPoints, point]
+    setCalibrationPoints(nextPoints)
+    setCalibrationError(null)
+
+    if (nextPoints.length === 1) {
+      setCalibrationMessage('First point selected. Click the 10 mm mark.')
+      return
+    }
+
+    if (nextPoints.length !== 2) return
+
+
+    try {
+      const result = await manualCalibrate(image.image_id, nextPoints[0], nextPoints[1], 10)
+      if (result.um_per_pixel == null) throw new Error(result.error || 'Calibration failed')
+      setUmPerPixelState(result.um_per_pixel)
+      calStore.setCalibration(
+        result.um_per_pixel,
+        result.calibration_id ?? '',
+        result.method,
+        result.confidence,
+      )
+      setCalibrationMode(false)
+      setCalibrationMessage(
+        `Saved scale: ${result.um_per_pixel.toFixed(4)} μm/px (${result.ruler_px?.toFixed(1)} px over 10 mm).`,
+      )
+    } catch (e: any) {
+      setCalibrationError(e.message || 'Calibration failed')
+      setCalibrationMessage(null)
+      setCalibrationPoints([])
+    }
+  }
 
   const handleRunDetection = async (config?: {
     tileSize: number
@@ -560,6 +637,12 @@ export default function WorkspacePage() {
                 umPerPixel={umPerPixel}
                 setUmPerPixel={setUmPerPixel}
                 calibrated={calStore.umPerPixel != null}
+                calibrationMode={calibrationMode}
+                calibrationPointCount={calibrationPoints.length}
+                calibrationError={calibrationError}
+                calibrationMessage={calibrationMessage}
+                onStartCalibration={handleStartCalibration}
+                onCancelCalibration={handleCancelCalibration}
                 detectionDone={detectionDone}
                 detectionJob={detectionJob ?? null}
                 detectionError={detectionError}
@@ -636,31 +719,66 @@ export default function WorkspacePage() {
                 src={viewerSrc}
                 alt={image.filename}
                 className="h-full"
-                transformOverlay={showBboxOverlay ? (
-                  <BboxOverlay
-                    boxes={refinement.boxes}
-                    imageWidth={image.width}
-                    imageHeight={image.height}
-                    selectedId={refinement.selectedId}
-                    onBoxClick={refineMode && editTool === 'reject'
-                      ? (id) => {
-                          const box = refinement.boxes.find((b) => b.id === id)
-                          if (box?.status === 'added') refinement.removeBox(id)
-                          else refinement.toggleBox(id)
-                        }
-                      : refinement.selectBox}
-                    drawingBox={refinement.drawingBox}
-                    mode={refineMode && editTool === 'draw' ? 'draw' : 'review'}
-                    onDrawStart={refineMode ? refinement.startDraw : undefined}
-                    onDrawMove={refineMode ? refinement.updateDraw : undefined}
-                    onDrawEnd={refineMode ? refinement.commitDraw : undefined}
-                  />
+                onImageClick={calibrationMode ? handleCalibrationClick : undefined}
+                transformOverlay={(showBboxOverlay || calibrationPoints.length > 0) ? (
+                  <>
+                    {showBboxOverlay && (
+                      <BboxOverlay
+                        boxes={refinement.boxes}
+                        imageWidth={image.width}
+                        imageHeight={image.height}
+                        selectedId={refinement.selectedId}
+                        onBoxClick={refineMode && editTool === 'reject'
+                          ? (id) => {
+                              const box = refinement.boxes.find((b) => b.id === id)
+                              if (box?.status === 'added') refinement.removeBox(id)
+                              else refinement.toggleBox(id)
+                            }
+                          : refinement.selectBox}
+                        drawingBox={refinement.drawingBox}
+                        mode={refineMode && editTool === 'draw' ? 'draw' : 'review'}
+                        onDrawStart={refineMode ? refinement.startDraw : undefined}
+                        onDrawMove={refineMode ? refinement.updateDraw : undefined}
+                        onDrawEnd={refineMode ? refinement.commitDraw : undefined}
+                      />
+                    )}
+                    {calibrationPoints.length > 0 && (
+                      <svg
+                        viewBox={`0 0 ${image.width} ${image.height}`}
+                        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+                      >
+                        {calibrationPoints.length === 2 && (
+                          <line
+                            x1={calibrationPoints[0][0]}
+                            y1={calibrationPoints[0][1]}
+                            x2={calibrationPoints[1][0]}
+                            y2={calibrationPoints[1][1]}
+                            stroke="#f59e0b"
+                            strokeWidth={Math.max(4, image.width / 1500)}
+                            strokeDasharray={`${Math.max(8, image.width / 700)} ${Math.max(6, image.width / 900)}`}
+                          />
+                        )}
+                        {calibrationPoints.map(([x, y], i) => (
+                          <g key={`${x}-${y}-${i}`}>
+                            <circle cx={x} cy={y} r={Math.max(10, image.width / 700)} fill="#f59e0b" opacity="0.9" />
+                            <circle cx={x} cy={y} r={Math.max(18, image.width / 420)} fill="none" stroke="#f59e0b" strokeWidth={Math.max(3, image.width / 2200)} />
+                          </g>
+                        ))}
+                      </svg>
+                    )}
+                  </>
                 ) : undefined}
-                disablePan={refineMode && editTool === 'draw'}
+                disablePan={calibrationMode || (refineMode && editTool === 'draw')}
               />
 
+              {calibrationMode && (
+                <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 shadow-sm">
+                  Click {calibrationPoints.length === 0 ? '0 mm' : '10 mm'} mark on the scale bar
+                </div>
+              )}
+
               {/* Floating annotation toolbar — always visible once detection is done */}
-              {detectionDone && (
+              {detectionDone && !calibrationMode && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 flex flex-col gap-0.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5">
                   {refineMode ? (
                     <>
