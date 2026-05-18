@@ -28,6 +28,8 @@ import type { ImageInfo, ProjectImage } from '../api/types'
 
 type ModalType = 'advanced-detection' | 'finetune' | null
 
+const basename = (path: string) => path.split(/[\\/]/).pop()
+
 export default function WorkspacePage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
@@ -127,7 +129,7 @@ export default function WorkspacePage() {
   // ── Derived State ───────────────────────────────────────────────────
   const samOverlayUrl = useMemo(() => {
     if (!measurementDone || !measureJob?.result?.overlay_path) return null
-    const filename = (measureJob.result.overlay_path as string).split('/').pop()
+    const filename = basename(measureJob.result.overlay_path as string)
     if (!filename) return null
     return outputFileUrl(measureJob.id, filename)
   }, [measurementDone, measureJob])
@@ -186,7 +188,7 @@ export default function WorkspacePage() {
   // Load CSV when measurement completes
   useEffect(() => {
     if (measureJob?.status === 'completed' && measureJob.result?.csv_path) {
-      const filename = (measureJob.result.csv_path as string).split('/').pop()
+      const filename = basename(measureJob.result.csv_path as string)
       if (!filename) return
       fetch(outputFileUrl(measureJob.id, filename))
         .then((r) => r.text())
@@ -423,14 +425,14 @@ export default function WorkspacePage() {
       link.download = image?.filename ?? 'image.jpg'
       link.click()
     } else if (format === 'csv' && measureJob.result.csv_path) {
-      const filename = measureJob.result.csv_path.split('/').pop()!
+      const filename = basename(measureJob.result.csv_path)!
       const url = outputFileUrl(measureJob.id, filename)
       const link = document.createElement('a')
       link.href = url
       link.download = filename
       link.click()
     } else if (format === 'excel' && measureJob.result.excel_path) {
-      const filename = measureJob.result.excel_path.split('/').pop()!
+      const filename = basename(measureJob.result.excel_path)!
       const url = outputFileUrl(measureJob.id, filename)
       const link = document.createElement('a')
       link.href = url

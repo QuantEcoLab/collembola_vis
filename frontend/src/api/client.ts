@@ -156,7 +156,7 @@ export const thumbnailUrl = (imageId: string) =>
 
 // Output file URL helper
 export const outputFileUrl = (jobId: string, filename: string) =>
-  `${BASE}/files/outputs/${jobId}/${filename}`
+  `${BASE}/files/outputs/${jobId}/${encodeURIComponent(filename)}`
 
 // Detection boxes (raw CSV as JSON)
 export const getDetectionBoxes = (jobId: string) =>
