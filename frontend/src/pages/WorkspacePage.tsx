@@ -350,7 +350,7 @@ export default function WorkspacePage() {
     setCalibrationMode(true)
     setCalibrationPoints([])
     setCalibrationError(null)
-    setCalibrationMessage('Click the 0 mm mark, then the 10 mm mark.')
+    setCalibrationMessage('Please select two points corresponding to 0 mm and 10 mm on the image scale.')
     setRefineMode(false)
     setEditTool('select')
   }
