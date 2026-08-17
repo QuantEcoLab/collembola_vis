@@ -1,167 +1,148 @@
 #!/bin/bash
-# Deployment script for Collembola Detection Pipeline with Cloudflare Tunnel
-# Deploys to: advandeb.com/collembola
+# Deployment script for the Collembola Detection Pipeline.
+#
+# HOW PRODUCTION ACTUALLY SERVES (advandeb, /home/adeb/dev/collembola_vis):
+#
+#   Cloudflare tunnel e2e3bfc1
+#   ├── collembola.advandeb.com -> localhost:9000  uvicorn directly, no nginx.
+#   │                                              FastAPI serves the API at /api/*
+#   │                                              and the SPA from frontend/dist
+#   │                                              (vite base '/').
+#   └── advandeb.com            -> localhost:8200  nginx site "advandeb"
+#                                                  /collembola/ -> frontend/dist-collembola/
+#                                                  (vite base '/collembola/')
+#                                                  /collembola/api -> proxy 9000
+#
+# Because two base paths are live, BOTH frontend builds must be produced.
+#
+# This script deliberately does NOT touch:
+#   - /etc/cloudflared/config.yml   The repo copy is not authoritative and has
+#                                   drifted from the live one. Overwriting it
+#                                   breaks cadapti, ollama and advandeb.com.
+#   - /etc/nginx/sites-*            The live site is "advandeb", which this repo
+#                                   does not own. nginx-collembola*.conf in this
+#                                   repo describe a vestigial :8100 site that
+#                                   proxies to a dead port; they are unused.
+#   - /etc/systemd/system/          Only re-copy collembola.service by hand if
+#                                   you actually changed it.
+#
+# Consequently this script needs NO sudo for the common case (frontend-only
+# changes). Restarting the backend is a separate, explicit step - see the end.
 
-set -e  # Exit on error
+set -euo pipefail
 
-echo "=== Collembola Detection Pipeline Deployment (Cloudflare) ==="
-echo ""
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
 
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
-
-# Configuration
 REPO_DIR="/home/adeb/dev/collembola_vis"
-SERVICE_NAME="collembola.service"
-NGINX_CONF="nginx-collembola-localhost.conf"
+BACKEND_PORT=9000
 
 cd "$REPO_DIR"
 
-# Step 1: Pull latest code (if in git)
-echo -e "${YELLOW}[1/8] Checking for updates...${NC}"
-if [ -d .git ]; then
-    git pull
-    echo -e "${GREEN}✓ Code updated${NC}"
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}[1/5] Updating code...${NC}"
+BEFORE=$(git rev-parse HEAD)
+git pull --ff-only
+AFTER=$(git rev-parse HEAD)
+if [ "$BEFORE" = "$AFTER" ]; then
+    echo "Already up to date at $(git log -1 --format='%h %s')"
 else
-    echo "Not a git repository, skipping pull"
+    echo -e "${GREEN}✓ $BEFORE -> $AFTER${NC}"
 fi
 echo ""
 
-# Step 2: Update Python dependencies
-echo -e "${YELLOW}[2/8] Updating Python dependencies...${NC}"
-if [ -f "$HOME/miniforge3/envs/collembola/bin/pip" ]; then
-    "$HOME/miniforge3/envs/collembola/bin/pip" install -r requirements.txt --quiet
-    echo -e "${GREEN}✓ Python dependencies updated${NC}"
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}[2/5] Python dependencies...${NC}"
+PIP="$HOME/miniforge3/envs/collembola/bin/pip"
+if [ ! -x "$PIP" ]; then
+    echo -e "${RED}✗ Conda env missing at $HOME/miniforge3/envs/collembola${NC}"; exit 1
+fi
+if git diff --name-only "$BEFORE" "$AFTER" | grep -q '^requirements.txt$'; then
+    "$PIP" install -r requirements.txt --quiet
+    echo -e "${GREEN}✓ Dependencies updated${NC}"
 else
-    echo -e "${RED}✗ Conda environment not found at $HOME/miniforge3/envs/collembola${NC}"
-    exit 1
+    echo "requirements.txt unchanged, skipping"
 fi
 echo ""
 
-# Step 3: Build frontend
-echo -e "${YELLOW}[3/8] Building frontend...${NC}"
+# ---------------------------------------------------------------------------
+# Build into temporary directories first. vite empties its output directory
+# before writing, so building straight into dist/ means a failed build leaves
+# production serving nothing. Build, verify, then swap.
+echo -e "${YELLOW}[3/5] Building frontend (both base paths)...${NC}"
 cd frontend
-if [ ! -d node_modules ]; then
-    echo "Installing npm dependencies..."
-    npm install
-fi
-npm run build
-npm run build:collembola-path
-echo -e "${GREEN}✓ Frontend built to frontend/dist/ and frontend/dist-collembola/${NC}"
+[ -d node_modules ] || npm ci
+
+rm -rf dist.new dist-collembola.new
+./node_modules/.bin/tsc -b
+./node_modules/.bin/vite build --outDir dist.new --emptyOutDir
+./node_modules/.bin/vite build --base /collembola/ --outDir dist-collembola.new --emptyOutDir
+echo -e "${GREEN}✓ Built${NC}"
+echo ""
+
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}[4/5] Verifying builds before swap...${NC}"
+verify() {
+    local dir="$1" expected="$2"
+    local js css
+    js=$(grep -o 'assets/[^"]*\.js'  "$dir/index.html" | head -1)
+    css=$(grep -o 'assets/[^"]*\.css' "$dir/index.html" | head -1)
+    [ -n "$js" ] && [ -f "$dir/$js" ]   || { echo -e "${RED}✗ $dir: missing JS bundle${NC}";  exit 1; }
+    [ -n "$css" ] && [ -f "$dir/$css" ] || { echo -e "${RED}✗ $dir: missing CSS bundle${NC}"; exit 1; }
+    grep -q "src=\"$expected" "$dir/index.html" \
+        || { echo -e "${RED}✗ $dir: wrong asset base, expected $expected${NC}"; exit 1; }
+    echo "  $dir OK ($js)"
+}
+verify dist.new            "/assets/"
+verify dist-collembola.new "/collembola/assets/"
+echo -e "${GREEN}✓ Both builds valid${NC}"
+echo ""
+
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}[5/5] Swapping into place...${NC}"
+rm -rf dist.bak dist-collembola.bak
+[ -d dist ]            && mv dist dist.bak
+[ -d dist-collembola ] && mv dist-collembola dist-collembola.bak
+mv dist.new dist
+mv dist-collembola.new dist-collembola
+chmod -R 755 dist dist-collembola
+echo -e "${GREEN}✓ Swapped (previous builds kept as dist.bak / dist-collembola.bak)${NC}"
 cd ..
 echo ""
 
-# Step 4: Fix permissions
-echo -e "${YELLOW}[4/8] Setting permissions...${NC}"
-chmod 755 /home/adeb
-chmod -R 755 frontend/dist
-chmod -R 755 frontend/dist-collembola
-echo -e "${GREEN}✓ Permissions set${NC}"
-echo ""
-
-# Step 5: Update nginx configuration
-echo -e "${YELLOW}[5/8] Updating nginx configuration...${NC}"
-if [ -f "$NGINX_CONF" ]; then
-    sudo cp "$NGINX_CONF" /etc/nginx/sites-available/collembola
-    
-    # Create symlink if it doesn't exist
-    if [ ! -L /etc/nginx/sites-enabled/collembola ]; then
-        sudo ln -s /etc/nginx/sites-available/collembola /etc/nginx/sites-enabled/
+# ---------------------------------------------------------------------------
+echo -e "${YELLOW}Verifying live endpoints...${NC}"
+fail=0
+check() {
+    local label="$1" url="$2" want="$3"
+    if curl -s -m 10 "$url" | grep -q "$want"; then
+        echo -e "  ${GREEN}✓${NC} $label"
+    else
+        echo -e "  ${RED}✗${NC} $label  ($url)"; fail=1
     fi
-    
-    # Test nginx configuration
-    sudo nginx -t
-    echo -e "${GREEN}✓ Nginx configuration updated${NC}"
-else
-    echo -e "${RED}✗ $NGINX_CONF not found${NC}"
-    exit 1
-fi
+}
+check "backend health (local :$BACKEND_PORT)" "http://localhost:$BACKEND_PORT/api/health"    '"ok"'
+check "collembola.advandeb.com"               "https://collembola.advandeb.com/api/health"   '"ok"'
+check "advandeb.com/collembola"               "https://advandeb.com/collembola/api/health"   '"ok"'
 echo ""
 
-# Step 6: Update systemd service
-echo -e "${YELLOW}[6/8] Updating systemd service...${NC}"
-if [ -f "$SERVICE_NAME" ]; then
-    sudo cp "$SERVICE_NAME" /etc/systemd/system/
-    sudo systemctl daemon-reload
-    echo -e "${GREEN}✓ Systemd service updated${NC}"
-else
-    echo -e "${RED}✗ $SERVICE_NAME not found${NC}"
+if [ "$fail" -ne 0 ]; then
+    echo -e "${RED}=== Verification FAILED ===${NC}"
+    echo "Roll back with:"
+    echo "  cd $REPO_DIR/frontend && rm -rf dist dist-collembola \\"
+    echo "    && mv dist.bak dist && mv dist-collembola.bak dist-collembola"
     exit 1
 fi
-echo ""
-
-# Step 7: Restart services
-echo -e "${YELLOW}[7/8] Restarting services...${NC}"
-sudo systemctl restart collembola
-sleep 2
-sudo systemctl reload nginx
-echo -e "${GREEN}✓ Services restarted${NC}"
-
-# Optional: Update Cloudflare tunnel if config changed
-if [ -f cloudflared-config.yml ]; then
-    echo "Updating Cloudflare tunnel config..."
-    sudo cp cloudflared-config.yml /etc/cloudflared/config.yml
-    sudo systemctl restart cloudflared
-    echo -e "${GREEN}✓ Cloudflare tunnel restarted${NC}"
-fi
-echo ""
-
-# Step 8: Verify deployment
-echo -e "${YELLOW}[8/8] Verifying deployment...${NC}"
-if systemctl is-active --quiet collembola; then
-    echo -e "${GREEN}✓ Backend service is running${NC}"
-else
-    echo -e "${RED}✗ Backend service failed to start${NC}"
-    sudo systemctl status collembola
-    exit 1
-fi
-
-if sudo nginx -t 2>/dev/null; then
-    echo -e "${GREEN}✓ Nginx configuration is valid${NC}"
-else
-    echo -e "${RED}✗ Nginx configuration error${NC}"
-    exit 1
-fi
-
-if systemctl is-active --quiet cloudflared; then
-    echo -e "${GREEN}✓ Cloudflare tunnel is running${NC}"
-else
-    echo -e "${YELLOW}⚠ Cloudflare tunnel may have issues${NC}"
-fi
-
-# Test backend health endpoint
-sleep 2
-if curl -s http://localhost:9000/api/health | grep -q "ok"; then
-    echo -e "${GREEN}✓ Backend API is responding${NC}"
-else
-    echo -e "${YELLOW}⚠ Backend API health check failed (may need more time to start)${NC}"
-fi
-
-# Test nginx
-if curl -sI http://localhost:9100/collembola/ | grep -q "200 OK"; then
-    echo -e "${GREEN}✓ Nginx is serving the app${NC}"
-else
-    echo -e "${YELLOW}⚠ Nginx response unexpected${NC}"
-fi
-echo ""
 
 echo -e "${GREEN}=== Deployment Complete ===${NC}"
 echo ""
-echo "Application deployed at: https://advandeb.com/collembola"
-echo "  (Allow 10-30 seconds for Cloudflare tunnel DNS propagation)"
+echo "  https://collembola.advandeb.com/"
+echo "  https://advandeb.com/collembola/"
 echo ""
-echo "Useful commands:"
-echo "  - Check backend logs:        sudo journalctl -u collembola -f"
-echo "  - Check nginx logs:          sudo tail -f /var/log/nginx/error.log"
-echo "  - Check tunnel logs:         sudo journalctl -u cloudflared -f"
-echo "  - Restart backend:           sudo systemctl restart collembola"
-echo "  - Reload nginx:              sudo systemctl reload nginx"
-echo "  - Restart cloudflare:        sudo systemctl restart cloudflared"
+echo "Backend restart is NOT part of this script. It is only needed when"
+echo "something under backend/ or requirements.txt changed:"
+echo "  sudo systemctl restart collembola"
 echo ""
-echo "Local test URLs:"
-echo "  - Backend:  http://localhost:9000/collembola/api/health"
-echo "  - Nginx:    http://localhost:9100/collembola/"
+echo "Logs:      sudo journalctl -u collembola -f"
+echo "Rollback:  cd $REPO_DIR/frontend && rm -rf dist dist-collembola \\"
+echo "             && mv dist.bak dist && mv dist-collembola.bak dist-collembola"
 echo ""
