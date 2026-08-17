@@ -1,4 +1,4 @@
-import { Settings2, RefreshCw, Table2, CheckCircle2, ImagePlus } from 'lucide-react'
+import { Settings2, RefreshCw, Table2, CheckCircle2, ImagePlus, Ruler, X } from 'lucide-react'
 import JobProgress from './JobProgress'
 import type { Job } from '../api/types'
 
@@ -18,6 +18,12 @@ interface Props {
   umPerPixel: number
   setUmPerPixel: (v: number) => void
   calibrated: boolean
+  calibrationMode: boolean
+  calibrationPointCount: number
+  calibrationError: string | null
+  calibrationMessage: string | null
+  onStartCalibration: () => void
+  onCancelCalibration: () => void
 
   // Detection
   detectionDone: boolean
@@ -51,6 +57,12 @@ export function WorkspaceSidebar({
   umPerPixel,
   setUmPerPixel,
   calibrated,
+  calibrationMode,
+  calibrationPointCount,
+  calibrationError,
+  calibrationMessage,
+  onStartCalibration,
+  onCancelCalibration,
   detectionDone,
   detectionJob,
   detectionError,
@@ -133,6 +145,24 @@ export function WorkspaceSidebar({
               ))}
             </select>
           </div>
+          <button
+            onClick={calibrationMode ? onCancelCalibration : onStartCalibration}
+            className={`w-full mt-2 px-3 py-1.5 rounded-lg text-sm flex items-center justify-center gap-2 transition-colors ${
+              calibrationMode
+                ? 'border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100'
+                : 'border border-gray-300 text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            {calibrationMode ? <X size={14} /> : <Ruler size={14} />}
+            {calibrationMode ? 'Cancel Calibration' : 'Calibrate from Scale Bar'}
+          </button>
+          {calibrationMode && (
+            <p className="text-[11px] text-amber-700 mt-1.5">
+              Click the 0 mm and 10 mm marks on the image. Points selected: {calibrationPointCount}/2.
+            </p>
+          )}
+          {calibrationMessage && <p className="text-[11px] text-green-700 mt-1.5">{calibrationMessage}</p>}
+          {calibrationError && <p className="text-[11px] text-red-600 mt-1.5">{calibrationError}</p>}
         </div>
 
         {/* ── Detection ───────────────────────────────────────── */}
