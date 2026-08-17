@@ -2,6 +2,8 @@ tunnel: e2e3bfc1-235f-40fe-9b6c-99da3e9bf268
 credentials-file: /etc/cloudflared/e2e3bfc1-235f-40fe-9b6c-99da3e9bf268.json
 
 ingress:
+  - hostname: collembola.advandeb.com
+    service: http://localhost:9000
   - hostname: ai.advandeb.com
     service: http://localhost:3000
   - hostname: reproduction.advandeb.com
@@ -11,5 +13,5 @@ ingress:
   - hostname: ollama.advandeb.com
     service: http://localhost:11434
   - hostname: advandeb.com
-    service: http://localhost:8100
+    service: http://localhost:9100
   - service: http_status:404

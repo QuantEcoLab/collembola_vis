@@ -5,7 +5,6 @@ import ImageUploader from '../components/ImageUploader'
 import ImageViewer from '../components/ImageViewer'
 import BboxOverlay from '../components/BboxOverlay'
 import { AdvancedDetectionModal } from '../components/AdvancedDetectionModal'
-import { FineTuneModal } from '../components/FineTuneModal'
 import { ViewerToolbar, type OverlayMode } from '../components/ViewerToolbar'
 import { MeasurementModal } from '../components/MeasurementModal'
 import { WorkspaceSidebar } from '../components/WorkspaceSidebar'
@@ -26,7 +25,7 @@ import { useWorkspaceStore } from '../store/workspaceStore'
 import { useProjectStore } from '../store/projectStore'
 import type { ImageInfo, ProjectImage } from '../api/types'
 
-type ModalType = 'advanced-detection' | 'finetune' | null
+type ModalType = 'advanced-detection' | null
 
 export default function WorkspacePage() {
   const navigate = useNavigate()
@@ -469,6 +468,14 @@ export default function WorkspacePage() {
             >
               Workspace
             </Link>
+            {role === 'admin' && (
+              <Link
+                to="/finetune"
+                className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+              >
+                Fine-Tune
+              </Link>
+            )}
           </nav>
           {image && (
             <span
@@ -741,11 +748,11 @@ export default function WorkspacePage() {
                         Save
                       </button>
 
-                      {/* Fine-tune (admin only) */}
-                      {role === 'admin' && refinement.annotationsSaved && (
+                      {/* Fine-tune shortcut (admin only) */}
+                      {role === 'admin' && (
                         <button
-                          onClick={() => setModalOpen('finetune')}
-                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+                          onClick={() => navigate('/finetune')}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-violet-600 text-white hover:bg-violet-700 transition-colors"
                         >
                           Fine-Tune
                         </button>
@@ -790,17 +797,6 @@ export default function WorkspacePage() {
           setModalOpen(null)
         }}
         initialConfig={{ tileSize, overlap, confidence: conf, iouThreshold: 0.5, device }}
-      />
-
-      <FineTuneModal
-        isOpen={modalOpen === 'finetune'}
-        onClose={() => setModalOpen(null)}
-        onSubmit={(config) => {
-          // TODO: Implement fine-tuning API call
-          console.log('Fine-tune config:', config)
-          setModalOpen(null)
-        }}
-        detectionJobId={detectionJobId ?? undefined}
       />
 
       <MeasurementModal

@@ -1,4 +1,4 @@
-import { Settings2, RefreshCw, Table2, CheckCircle2 } from 'lucide-react'
+import { Settings2, RefreshCw, Table2, CheckCircle2, ImagePlus } from 'lucide-react'
 import JobProgress from './JobProgress'
 import type { Job } from '../api/types'
 
@@ -79,9 +79,18 @@ export function WorkspaceSidebar({
     <div className="flex flex-col h-full overflow-hidden">
       {/* Image info */}
       <div className="px-4 pt-4 pb-3 border-b shrink-0">
-        <p className="text-xs font-medium text-gray-700 truncate" title={imageFilename}>
-          {imageFilename}
-        </p>
+        <div className="flex items-start justify-between gap-1">
+          <p className="text-xs font-medium text-gray-700 truncate min-w-0" title={imageFilename}>
+            {imageFilename}
+          </p>
+          <button
+            onClick={onReset}
+            title="Upload a different image"
+            className="shrink-0 text-gray-400 hover:text-blue-600 transition-colors"
+          >
+            <ImagePlus size={14} />
+          </button>
+        </div>
         <p className="text-[10px] text-gray-400 mt-0.5">
           {imageWidth} × {imageHeight} px
         </p>

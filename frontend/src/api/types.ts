@@ -32,7 +32,7 @@ export interface JobResult {
 
 export interface Job {
   id: string
-  type: 'detection' | 'measurement' | 'calibration' | 'batch' | 'batch_measure' | 'batch_process' | 'finetune'
+  type: 'detection' | 'measurement' | 'calibration' | 'batch' | 'batch_measure' | 'batch_process' | 'finetune' | 'finetune_all'
   status: 'pending' | 'running' | 'completed' | 'failed'
   progress: number
   message: string

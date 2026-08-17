@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:collembola-path": "vite build --base /collembola/ --outDir dist-collembola",
     "lint": "eslint .",
     "preview": "vite preview"
   },

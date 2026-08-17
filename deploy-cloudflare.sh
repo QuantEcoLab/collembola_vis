@@ -49,7 +49,8 @@ if [ ! -d node_modules ]; then
     npm install
 fi
 npm run build
-echo -e "${GREEN}✓ Frontend built to frontend/dist/${NC}"
+npm run build:collembola-path
+echo -e "${GREEN}✓ Frontend built to frontend/dist/ and frontend/dist-collembola/${NC}"
 cd ..
 echo ""
 
@@ -57,6 +58,7 @@ echo ""
 echo -e "${YELLOW}[4/8] Setting permissions...${NC}"
 chmod 755 /home/adeb
 chmod -R 755 frontend/dist
+chmod -R 755 frontend/dist-collembola
 echo -e "${GREEN}✓ Permissions set${NC}"
 echo ""
 
@@ -132,14 +134,14 @@ fi
 
 # Test backend health endpoint
 sleep 2
-if curl -s http://localhost:8000/collembola/api/health | grep -q "ok"; then
+if curl -s http://localhost:9000/api/health | grep -q "ok"; then
     echo -e "${GREEN}✓ Backend API is responding${NC}"
 else
     echo -e "${YELLOW}⚠ Backend API health check failed (may need more time to start)${NC}"
 fi
 
 # Test nginx
-if curl -sI http://localhost:8100/collembola/ | grep -q "200 OK"; then
+if curl -sI http://localhost:9100/collembola/ | grep -q "200 OK"; then
     echo -e "${GREEN}✓ Nginx is serving the app${NC}"
 else
     echo -e "${YELLOW}⚠ Nginx response unexpected${NC}"
@@ -160,6 +162,6 @@ echo "  - Reload nginx:              sudo systemctl reload nginx"
 echo "  - Restart cloudflare:        sudo systemctl restart cloudflared"
 echo ""
 echo "Local test URLs:"
-echo "  - Backend:  http://localhost:8000/collembola/api/health"
-echo "  - Nginx:    http://localhost:8100/collembola/"
+echo "  - Backend:  http://localhost:9000/collembola/api/health"
+echo "  - Nginx:    http://localhost:9100/collembola/"
 echo ""

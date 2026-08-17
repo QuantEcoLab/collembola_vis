@@ -110,7 +110,7 @@ fi
 
 # Test backend health endpoint
 sleep 2
-if curl -s http://localhost:8000/collembola/api/health | grep -q "ok"; then
+if curl -s http://localhost:9000/collembola/api/health | grep -q "ok"; then
     echo -e "${GREEN}✓ Backend API is responding${NC}"
 else
     echo -e "${YELLOW}⚠ Backend API health check failed (may need more time to start)${NC}"

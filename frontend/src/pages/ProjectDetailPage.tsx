@@ -96,6 +96,7 @@ export default function ProjectDetailPage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
   const storedUsername = useAuthStore((s) => s.username)
+  const role = useAuthStore((s) => s.role)
   const username = storedUsername ?? ''
 
   const workspaceStore = useWorkspaceStore()
@@ -510,6 +511,14 @@ export default function ProjectDetailPage() {
             >
               Workspace
             </Link>
+            {role === 'admin' && (
+              <Link
+                to="/finetune"
+                className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+              >
+                Fine-Tune
+              </Link>
+            )}
           </nav>
         </div>
         <button

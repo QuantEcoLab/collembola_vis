@@ -4,9 +4,9 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import db, db_projects
@@ -21,6 +21,7 @@ from backend.services.batch_measurement import run_batch_measurement
 from backend.services.batch_process import run_batch_process
 from backend.services.detection import run_detection
 from backend.services.finetune import run_finetune
+from backend.services.finetune_all import run_finetune_all as run_finetune_all_service
 from backend.services.measurement import run_measurement
 from backend.websocket.progress import router as ws_router
 
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
     job_manager.register_handler(JobType.DETECTION, run_detection)
     job_manager.register_handler(JobType.MEASUREMENT, run_measurement)
     job_manager.register_handler(JobType.FINETUNE, run_finetune)
+    job_manager.register_handler(JobType.FINETUNE_ALL, run_finetune_all_service)
     job_manager.register_handler(JobType.BATCH, run_batch_detection)
     job_manager.register_handler(JobType.BATCH_MEASURE, run_batch_measurement)
     job_manager.register_handler(JobType.BATCH_PROCESS, run_batch_process)
@@ -47,8 +49,13 @@ async def lifespan(app: FastAPI):
 
 _root_path = os.environ.get("ROOT_PATH", "/collembola")
 _cors_origins = os.environ.get(
-    "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    "CORS_ORIGINS", "http://localhost:9173,http://127.0.0.1:9173"
 ).split(",")
+_enforce_https_hosts = {
+    host.strip().lower()
+    for host in os.environ.get("ENFORCE_HTTPS_HOSTS", "collembola.advandeb.com").split(",")
+    if host.strip()
+}
 
 app = FastAPI(
     title="Collembola Detection Pipeline",
@@ -65,6 +72,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _request_scheme(request: Request) -> str:
+    forwarded_proto = request.headers.get("x-forwarded-proto")
+    if forwarded_proto:
+        return forwarded_proto.split(",", 1)[0].strip().lower()
+
+    if request.headers.get("x-forwarded-ssl", "").lower() == "on":
+        return "https"
+
+    cf_visitor = request.headers.get("cf-visitor", "")
+    if '"scheme":"https"' in cf_visitor.replace(" ", "").lower():
+        return "https"
+
+    return request.url.scheme.lower()
+
+
+@app.middleware("http")
+async def enforce_https(request: Request, call_next):
+    host = request.headers.get("host", "").split(":", 1)[0].lower()
+    if host in _enforce_https_hosts and _request_scheme(request) != "https":
+        return RedirectResponse(str(request.url.replace(scheme="https")), status_code=308)
+    return await call_next(request)
 
 # API routers
 app.include_router(auth_router)
@@ -92,7 +122,7 @@ app.mount("/files/uploads", StaticFiles(directory=str(uploads_dir)), name="uploa
 app.mount("/files/outputs", StaticFiles(directory=str(outputs_dir)), name="outputs")
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
     return {"status": "ok"}
 
@@ -101,7 +131,7 @@ async def health():
 if _DIST.is_dir():
     app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="spa_assets")
 
-    @app.get("/{full_path:path}")
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
     async def serve_spa(full_path: str):
         """Serve built frontend; fall back to index.html for SPA routing."""
         candidate = _DIST / full_path

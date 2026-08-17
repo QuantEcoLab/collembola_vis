@@ -195,6 +195,21 @@ export const runFinetune = (req: FinetuneRequest) =>
     body: JSON.stringify(req),
   })
 
+export interface FinetuneAllRequest {
+  base_model?: string
+  epochs?: number
+  device?: string
+  tile_size?: number
+  overlap?: number
+  min_added?: number
+}
+
+export const runFinetuneAll = (req: FinetuneAllRequest) =>
+  request<{ job_id: string; status: string }>('/api/finetune/run-all', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
 // Projects
 export const listProjects = () => request<Project[]>('/api/projects')
 

@@ -4,15 +4,16 @@ import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  base: '/collembola/',
+  base: '/',
   server: {
+    port: 9173,
     proxy: {
-      '/api': 'http://localhost:8000',
+      '/api': 'http://localhost:9000',
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: 'ws://localhost:9000',
         ws: true,
       },
-      '/files': 'http://localhost:8000',
+      '/files': 'http://localhost:9000',
     },
   },
 })

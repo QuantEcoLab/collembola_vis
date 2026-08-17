@@ -107,7 +107,7 @@ When `use_annotations=True` is passed to the measurement endpoint, the backend r
 # Install dependencies (one-time)
 make install
 
-# Run both servers (backend :8000, frontend :5173)
+# Run both servers (backend :9000, frontend :9173)
 make dev
 
 # Or run individually

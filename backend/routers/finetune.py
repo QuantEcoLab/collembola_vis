@@ -1,4 +1,4 @@
-"""Fine-tune endpoint."""
+"""Fine-tune endpoints (single-image and all-annotations)."""
 
 import json
 from pathlib import Path
@@ -55,4 +55,30 @@ async def run_finetune(req: FinetuneRequest):
         params["overlap"] = req.overlap
 
     job = job_manager.submit(JobType.FINETUNE, params)
+    return {"job_id": job.id, "status": job.status.value}
+
+
+class FinetuneAllRequest(BaseModel):
+    base_model: str | None = None
+    epochs: int = 20
+    device: str | None = None
+    tile_size: int | None = None
+    overlap: int | None = None
+    min_added: int = 10  # only use images where user added > this many boxes
+
+
+@router.post("/run-all")
+async def run_finetune_all(req: FinetuneAllRequest):
+    """Fine-tune on all images where users manually added > min_added new boxes."""
+    params: dict = {"epochs": req.epochs, "min_added": req.min_added}
+    if req.base_model:
+        params["base_model"] = req.base_model
+    if req.device:
+        params["device"] = req.device
+    if req.tile_size is not None:
+        params["tile_size"] = req.tile_size
+    if req.overlap is not None:
+        params["overlap"] = req.overlap
+
+    job = job_manager.submit(JobType.FINETUNE_ALL, params)
     return {"job_id": job.id, "status": job.status.value}

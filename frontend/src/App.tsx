@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage'
 import WorkspacePage from './pages/WorkspacePage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
+import FineTunePage from './pages/FineTunePage'
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/projects/:id" element={<ProjectDetailPage />} />
         <Route path="/workspace" element={<WorkspacePage />} />
+        <Route path="/finetune" element={<FineTunePage />} />
         <Route path="*" element={<Navigate to="/projects" replace />} />
       </Route>
     </Routes>

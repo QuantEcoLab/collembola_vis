@@ -21,6 +21,7 @@ class JobType(str, Enum):
     BATCH_MEASURE = "batch_measure"
     BATCH_PROCESS = "batch_process"
     FINETUNE = "finetune"
+    FINETUNE_ALL = "finetune_all"
 
 
 @dataclass

@@ -8,7 +8,7 @@ dev:
 	wait
 
 backend:
-	uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn backend.main:app --reload --host 0.0.0.0 --port 9000
 
 frontend:
 	cd frontend && npm run dev

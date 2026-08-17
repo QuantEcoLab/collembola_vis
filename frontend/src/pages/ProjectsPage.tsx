@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { LogOut, Plus, FolderOpen, Loader2, Trash2, X } from 'lucide-react'
-import { listProjects, createProject, deleteProject } from '../api/client'
-import { thumbnailUrl } from '../api/client'
+import { listProjects, createProject, deleteProject, thumbnailUrl } from '../api/client'
 import { useAuthStore } from '../store/authStore'
 import { useJobProgress } from '../hooks/useJob'
 import type { Project } from '../api/types'
@@ -26,7 +25,7 @@ function ProcessingBadge({ projectId }: { projectId: string }) {
 
 export default function ProjectsPage() {
   const navigate = useNavigate()
-  const logout = useAuthStore((s) => s.logout)
+  const { logout, role } = useAuthStore()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -97,6 +96,14 @@ export default function ProjectsPage() {
             >
               Workspace
             </Link>
+            {role === 'admin' && (
+              <Link
+                to="/finetune"
+                className="text-sm px-3 py-1 rounded-md text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition-colors"
+              >
+                Fine-Tune
+              </Link>
+            )}
           </nav>
         </div>
         <button
