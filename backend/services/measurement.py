@@ -65,6 +65,19 @@ def run_measurement(job: Job, progress_callback) -> dict[str, Any]:
     }
     if method == "sam" and overlay_path is not None:
         result["overlay_path"] = str(overlay_path)
+    if method != "sam":
+        trunk_overlay = output_dir / f"{image_path.stem}_trunk_overlay.jpg"
+        trunk_debug = output_dir / f"{image_path.stem}_trunk_debug_panels.jpg"
+        trunk_contours = output_dir / f"{output_csv.stem}_trunk_contours.json"
+        trunk_masks = output_dir / f"{output_csv.stem}_trunk_masks.npz"
+        if trunk_overlay.exists():
+            result["trunk_overlay_path"] = str(trunk_overlay)
+        if trunk_debug.exists():
+            result["trunk_debug_panels_path"] = str(trunk_debug)
+        if trunk_contours.exists():
+            result["trunk_contours_path"] = str(trunk_contours)
+        if trunk_masks.exists():
+            result["trunk_masks_path"] = str(trunk_masks)
 
     result.update({
         "summary": {

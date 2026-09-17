@@ -151,22 +151,24 @@ export default function WorkspacePage() {
   const hasNext = currentSiblingIndex >= 0 && currentSiblingIndex < siblingImages.length - 1
 
   // ── Derived State ───────────────────────────────────────────────────
-  const samOverlayUrl = useMemo(() => {
-    if (!measurementDone || !measureJob?.result?.overlay_path) return null
-    const filename = basename(measureJob.result.overlay_path as string)
+  const contourOverlayUrl = useMemo(() => {
+    if (!measurementDone || !measureJob?.result) return null
+    const overlayPath = measureJob.result.trunk_overlay_path ?? measureJob.result.overlay_path
+    if (typeof overlayPath !== 'string') return null
+    const filename = basename(overlayPath)
     if (!filename) return null
     return outputFileUrl(measureJob.id, filename)
   }, [measurementDone, measureJob])
-  const hasSamOverlay = samOverlayUrl !== null
+  const hasContourOverlay = contourOverlayUrl !== null
 
   // Determine which image to show based on overlay mode
   const viewerSrc = useMemo(() => {
     if (!image) return ''
-    if ((overlayMode === 'contours' || overlayMode === 'both') && samOverlayUrl) {
-      return samOverlayUrl
+    if ((overlayMode === 'contours' || overlayMode === 'both') && contourOverlayUrl) {
+      return contourOverlayUrl
     }
     return imageUrl(image.image_id, image.filename)
-  }, [image, overlayMode, samOverlayUrl])
+  }, [image, overlayMode, contourOverlayUrl])
 
   // Show bbox overlay when mode is 'boxes' or 'both' and there are boxes to show
   const showBboxOverlay = !calibrationMode && (overlayMode === 'boxes' || overlayMode === 'both') && refinement.boxes.length > 0
@@ -202,12 +204,12 @@ export default function WorkspacePage() {
     }
   }, [refinement.boxes.length])
 
-  // Auto-switch overlay mode when SAM measurement completes
+  // Auto-switch overlay mode when a measurement contour overlay completes
   useEffect(() => {
-    if (hasSamOverlay && overlayMode === 'raw') {
+    if (hasContourOverlay && overlayMode === 'raw') {
       setOverlayMode('contours')
     }
-  }, [hasSamOverlay, overlayMode])
+  }, [hasContourOverlay, overlayMode])
 
   // Load CSV when measurement completes
   useEffect(() => {
@@ -673,7 +675,7 @@ export default function WorkspacePage() {
                   onOverlayChange={setOverlayMode}
                   availableOverlays={{
                     boxes: detectionDone,
-                    contours: hasSamOverlay,
+                    contours: hasContourOverlay,
                   }}
                   onExport={handleExport}
                   measurementDone={measurementDone}
