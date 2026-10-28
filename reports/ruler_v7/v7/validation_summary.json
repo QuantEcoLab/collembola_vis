@@ -1,0 +1,44 @@
+{
+  "created_at": "2026-10-10T17:11:32",
+  "source_dataset": "data\\trunk_dataset_combined_v5\\yolo_seg",
+  "target_dataset": "data\\trunk_dataset_combined_v7\\yolo_seg",
+  "ruler_source_dataset": "data\\ruler_manual_annotation_v1\\yolo_seg_review_export_v1\\yolo_seg",
+  "large_ruler_scenes_added_to_train": false,
+  "candidate_counts": {
+    "total_primary_polygons": 129,
+    "accepted_total": 83,
+    "accepted_without_adjustment": 80,
+    "adjusted": 3,
+    "rejected": 46
+  },
+  "dataset_counts": {
+    "train_images": 1914,
+    "train_labels": 1914,
+    "val_images": 463,
+    "val_labels": 463
+  },
+  "checks": {
+    "no_name_collisions": true,
+    "no_missing_pairs": true,
+    "no_invalid_labels": true,
+    "v5_val_preserved_count": true
+  },
+  "collisions": [],
+  "missing_pairs": {
+    "train_images_without_labels": [],
+    "train_labels_without_images": [],
+    "val_images_without_labels": [],
+    "val_labels_without_images": []
+  },
+  "invalid_labels": [],
+  "audit_views_dir": "data\\trunk_dataset_combined_v7\\instance_crop_generation\\audit_views",
+  "contact_sheets": [
+    "data\\trunk_dataset_combined_v7\\instance_crop_generation\\contact_sheet_001.jpg",
+    "data\\trunk_dataset_combined_v7\\instance_crop_generation\\contact_sheet_002.jpg",
+    "data\\trunk_dataset_combined_v7\\instance_crop_generation\\contact_sheet_003.jpg",
+    "data\\trunk_dataset_combined_v7\\instance_crop_generation\\contact_sheet_004.jpg"
+  ],
+  "manifest": "data\\trunk_dataset_combined_v7\\yolo_seg\\added_instance_crop_manifest.csv",
+  "rejected_candidates": "data\\trunk_dataset_combined_v7\\yolo_seg\\rejected_instance_crop_candidates.csv",
+  "scale_audit": "data\\trunk_dataset_combined_v7\\yolo_seg\\scale_audit_summary.json"
+}

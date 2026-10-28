@@ -1,0 +1,6 @@
+source_id,image_path,selection_status,in_v7_yolo_seg_source_ids,excluded_original_three,notes
+C_3_2_Collembola011,data/slike_test_v5_nove/C_3_2_Collembola011.jpg,selected,False,False,"bright scale, many individuals near ruler numbers/ticks"
+C_4_1_PS_500-1000_014,data/slike_test_v5_nove/C_4_1_PS_500-1000_014.jpg,selected,False,False,"bright scale, organisms over/near ticks"
+C_5_1_PS_500-1000_017,data/slike_test_v5_nove/C_5_1_PS_500-1000_017.jpg,selected,False,False,"bright scale, dense field and ruler marks"
+C_1_2_Collembola005,data/final_holdout_v1/C_1_2_Collembola005.jpg,selected,False,False,"bright scale, dense individuals and ruler ticks"
+C_1_3_Collembola006,data/final_holdout_v1/C_1_3_Collembola006.jpg,selected,False,False,"bright scale, individuals around numbers/ticks"

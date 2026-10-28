@@ -1,0 +1,39 @@
+{
+  "created_at": "2026-10-12T10:20:39",
+  "source_dataset": "data\\trunk_dataset_combined_v7\\yolo_seg",
+  "target_dataset": "data\\trunk_dataset_combined_v7_clean_eval_final\\yolo_seg",
+  "starting_val_images": 463,
+  "no_edge_contact_included": 209,
+  "possible_keep_complete_included": 50,
+  "likely_truncated_excluded": 197,
+  "possible_exclude_truncated_excluded": 7,
+  "possible_unsure_excluded": 0,
+  "possible_pending_excluded": 0,
+  "included_total": 259,
+  "excluded_total": 204,
+  "images_count": 259,
+  "labels_count": 259,
+  "checks": {
+    "expected_starting_463": true,
+    "expected_included_259": true,
+    "expected_excluded_204": true,
+    "equal_image_label_count": true,
+    "no_missing_pairs": true,
+    "no_empty_labels": true,
+    "valid_yolo_seg_coordinates": true,
+    "all_possible_reviewed": true
+  },
+  "source_id_distribution": {
+    "CD_PA12_4_06_2026_004": 20,
+    "C_3_1_HDPE010": 21,
+    "C_5_2_HDPE017": 48,
+    "Fe3O4_C_1_1_Collembola026": 1,
+    "H3BO4_B_1_Collembola006": 1,
+    "K1_Fe2O3001": 168
+  },
+  "missing_pairs": [],
+  "empty_labels": [],
+  "invalid_labels": [],
+  "included_manifest": "data\\trunk_dataset_combined_v7_clean_eval_final\\yolo_seg\\included_manifest.csv",
+  "excluded_manifest": "data\\trunk_dataset_combined_v7_clean_eval_final\\yolo_seg\\excluded_manifest.csv"
+}

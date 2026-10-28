@@ -1,0 +1,13 @@
+{
+  "selection_count": 6,
+  "train_images": 6,
+  "val_images": 0,
+  "total_polygons": 129,
+  "all_labels_ok": true,
+  "dataset_yaml": "data\\ruler_manual_annotation_v1\\yolo_seg_review_export_v1\\yolo_seg\\dataset.yaml",
+  "overlay_contact_sheet": "data\\ruler_manual_annotation_v1\\yolo_seg_review_export_v1\\audit\\final_overlay_contact_sheet.jpg",
+  "edge_contact_sheet": "data\\ruler_manual_annotation_v1\\yolo_seg_review_export_v1\\audit\\final_edge_strips_contact_sheet.jpg",
+  "summary_csv": "data\\ruler_manual_annotation_v1\\yolo_seg_review_export_v1\\export_summary.csv",
+  "all_ruler_crops_assigned_to_train": true,
+  "note": "Ruler val is intentionally empty; use existing main YOLO-seg validation set for training validation."
+}

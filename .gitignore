@@ -46,3 +46,35 @@ frontend/node_modules/
 frontend/dist/
 data/uploads/
 data/web_outputs/
+
+# Ruler/v7 source-only branch: keep bulk artifacts outside new commits.
+*.pt
+*.zip
+*.7z
+*.tar
+*.tar.gz
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.tmp
+*.tmp.csv
+collembola-rescue/
+backup/
+backups/
+
+# Small approved research manifests live outside the ignored data/runs trees.
+!reports/ruler_v7/**/*.csv
+reports/ruler_v7/**/*.tmp.csv
+reports/ruler_v7/**/*.tmp
+reports/ruler_v7/**/*.png
+reports/ruler_v7/**/*.jpg
+reports/ruler_v7/**/*.jpeg
+reports/ruler_v7/**/*.tif
+reports/ruler_v7/**/*.tiff
+reports/ruler_v7/**/*.webp
+reports/ruler_v7/**/*.bmp
+reports/ruler_v7/**/images/
+reports/ruler_v7/**/masks/
+reports/ruler_v7/**/labels/
+reports/ruler_v7/**/yolo_seg/
