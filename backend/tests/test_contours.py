@@ -287,7 +287,8 @@ def test_worker_reuses_detector_crops_dedup_and_measures_only_final_masks(isolat
     dedup.assert_called_once()
     assert len(calls) == 3
     assert calls[0][0] == (29, 21, 3)  # Legacy floor/ceil, no additional padding.
-    assert all(kwargs == {"imgsz": 320, "conf": .15, "device": "cpu", "verbose": False} for _, kwargs in calls)
+    import torch
+    assert all(kwargs == {"imgsz": 320, "conf": .15, "device": torch.device("cpu"), "verbose": False} for _, kwargs in calls)
     assert [row["detection_id"] for row in result["measurements"]] == [0]
     assert result["num_organisms"] == 1
     assert result["volume_summary"]["count"] == 0  # Full-crop mask is unreliable.

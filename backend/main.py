@@ -26,6 +26,7 @@ from backend.services.finetune import run_finetune
 from backend.services.finetune_all import run_finetune_all as run_finetune_all_service
 from backend.services.measurement import run_measurement
 from backend.services.contours import run_contours, validate_checkpoint
+from backend.services.cuda_guard import pin_cuda_runtime
 from backend.websocket.progress import router as ws_router
 
 _DIST = Path(os.environ.get("COLLEMBOLA_FRONTEND_DIST", str(Path(__file__).parent.parent / "frontend" / "dist"))).resolve()
@@ -37,6 +38,8 @@ _PREVIEW_MANIFEST = json.loads((_DIST / "preview-build.json").read_text()) if _L
 async def lifespan(app: FastAPI):
     """Startup / shutdown."""
     validate_checkpoint()
+    # Enumerate CUDA before any job can run on CPU and clear CUDA_VISIBLE_DEVICES.
+    pin_cuda_runtime()
     if _LOCAL_PREVIEW and not _PREVIEW_MANIFEST:
         raise RuntimeError("Local preview requires a verified, versioned frontend manifest")
     settings.ensure_dirs()

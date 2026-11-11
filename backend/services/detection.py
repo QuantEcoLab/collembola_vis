@@ -11,6 +11,7 @@ if str(_repo_root) not in sys.path:
 
 from backend.config import settings
 from backend.jobs.models import Job
+from backend.services.cuda_guard import ensure_inference_device
 from backend.services.image_identity import capture_identity
 
 
@@ -35,6 +36,8 @@ def run_detection(job: Job, progress_callback) -> dict[str, Any]:
     if expected and expected != identity:
         raise ValueError("Fotografija ne odgovara identitetu zabilježenom pri slanju detekcije")
     output_dir = settings.outputs_dir / job.id
+    device = params.get("device", settings.default_device)
+    ensure_inference_device(device)
 
     detections = infer_tiled(
         image_path=image_path,
@@ -44,7 +47,7 @@ def run_detection(job: Job, progress_callback) -> dict[str, Any]:
         conf_threshold=params.get("conf", settings.default_conf),
         iou_threshold=params.get("iou", settings.default_iou),
         output_dir=str(output_dir),
-        device=params.get("device", settings.default_device),
+        device=device,
         progress_callback=progress_callback,
     )
 

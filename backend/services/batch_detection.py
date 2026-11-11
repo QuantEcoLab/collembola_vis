@@ -12,6 +12,7 @@ from backend import db_projects
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import Job, JobType
+from backend.services.cuda_guard import ensure_inference_device
 from backend.services.image_identity import capture_identity
 
 
@@ -32,6 +33,8 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
     project_id = params["project_id"]
     image_entries = params["image_entries"]
     total = len(image_entries)
+    device = params.get("device", settings.default_device)
+    ensure_inference_device(device)
 
     results = []
 
@@ -60,7 +63,7 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
                 conf_threshold=params.get("conf", settings.default_conf),
                 iou_threshold=params.get("iou", settings.default_iou),
                 output_dir=str(output_dir),
-                device=params.get("device", settings.default_device),
+                device=device,
                 progress_callback=None,
             )
 

@@ -212,6 +212,7 @@ def run_contours(job: Job, progress_callback):
     from PIL import Image
     from ultralytics import YOLO
     from backend.services.detection import run_detection
+    from scripts.infer_tiled import ultralytics_device
 
     legacy = _legacy_pipeline()
     output = settings.outputs_dir / job.id
@@ -232,6 +233,8 @@ def run_contours(job: Job, progress_callback):
         image = cv2.cvtColor(np.array(opened.convert("RGB")), cv2.COLOR_RGB2BGR)
     height, width = image.shape[:2]
     network = YOLO(str(checkpoint)) if detections else None
+    # Exp03 stays on CPU, but must not clear CUDA_VISIBLE_DEVICES for the shared backend process.
+    segmentation_device = ultralytics_device(legacy.PARAMS["device"])
     rows = []
     mask_dir = output / "masks"
     mask_dir.mkdir(exist_ok=True)
@@ -245,7 +248,7 @@ def run_contours(job: Job, progress_callback):
         if not crop.size:
             raise ValueError(f"Prazan bbox crop za detection {index}")
         result = network.predict(crop, imgsz=legacy.PARAMS["seg_imgsz"], conf=legacy.PARAMS["seg_conf"],
-                                 device=legacy.PARAMS["device"], verbose=False)[0]
+                                 device=segmentation_device, verbose=False)[0]
         mask, confidence = legacy.result_mask(result, crop.shape[:2])
         mask_path = mask_dir / f"det{index:05d}.png"
         if mask is not None:

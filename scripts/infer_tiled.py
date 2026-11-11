@@ -22,6 +22,23 @@ from ultralytics import YOLO
 import torch
 
 
+def ultralytics_device(device):
+    """Return the ``device`` argument to hand to ultralytics.
+
+    ``select_device("cpu")`` sets ``os.environ["CUDA_VISIBLE_DEVICES"] = ""`` for
+    the whole process. Inside the long-running web backend that hides every GPU
+    from later jobs (torch caches the empty device list), so CPU runs pass a
+    ``torch.device``, which ultralytics uses as is. The CPU thread count is set
+    exactly as ``select_device("cpu")`` would set it.
+    """
+    if isinstance(device, str) and device.strip().lower() == "cpu":
+        from ultralytics.utils import NUM_THREADS
+
+        torch.set_num_threads(NUM_THREADS)
+        return torch.device("cpu")
+    return device
+
+
 def tile_image(image_path, tile_size=1280, overlap=256):
     """
     Tile a large image into smaller overlapping tiles.
@@ -164,6 +181,7 @@ def infer_tiled(
     if progress_callback:
         progress_callback(0.0, "Loading model...")
     model = YOLO(model_path)
+    model_device = ultralytics_device(device)
 
     # Tile image
     print(f"\nTiling image (tile_size={tile_size}, overlap={overlap})...")
@@ -187,7 +205,7 @@ def infer_tiled(
             progress_callback(0.07 + 0.80 * (tile_idx / n_tiles), f"Tile {tile_idx + 1}/{n_tiles}")
 
         # Run YOLO on tile
-        results = model(tile_img, conf=conf_threshold, device=device, verbose=False)
+        results = model(tile_img, conf=conf_threshold, device=model_device, verbose=False)
 
         # Convert to full image coordinates
         for result in results:
