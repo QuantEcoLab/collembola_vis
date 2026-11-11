@@ -31,13 +31,8 @@ from PIL import Image
 from tqdm import tqdm
 from skimage.measure import regionprops
 
-# SAM imports
-try:
-    from segment_anything import sam_model_registry, SamPredictor
-except ImportError:
-    print("ERROR: segment_anything not installed")
-    print("Install with: pip install segment-anything")
-    sys.exit(1)
+# SAM is optional when reusing the existing measurements on an already available mask.
+# Import it only in the SAM segmentation entry point below.
 
 
 def _normalize_device(device: str) -> str:
@@ -53,8 +48,12 @@ def _normalize_device(device: str) -> str:
 
 def load_sam_predictor(checkpoint_path: str = "checkpoints/sam_vit_b.pth",
                        model_type: str = "vit_b",
-                       device: str = "cuda") -> SamPredictor:
+                       device: str = "cuda"):
     """Load SAM model for mask prediction."""
+    try:
+        from segment_anything import sam_model_registry, SamPredictor
+    except ImportError as exc:
+        raise RuntimeError("SAM is not installed; install segment-anything for the SAM method") from exc
     device = _normalize_device(device)
     print(f"Loading SAM model from {checkpoint_path} on {device}...")
     sam = sam_model_registry[model_type](checkpoint=checkpoint_path)
@@ -63,7 +62,7 @@ def load_sam_predictor(checkpoint_path: str = "checkpoints/sam_vit_b.pth",
     return predictor
 
 
-def segment_organism_sam(predictor: SamPredictor,
+def segment_organism_sam(predictor,
                           bbox: List[float]) -> np.ndarray:
     """Segment organism using SAM with bbox prompt.
 

@@ -11,6 +11,7 @@ if str(_repo_root) not in sys.path:
 
 from backend.config import settings
 from backend.jobs.models import Job
+from backend.services.image_identity import capture_identity
 
 
 def run_detection(job: Job, progress_callback) -> dict[str, Any]:
@@ -29,6 +30,10 @@ def run_detection(job: Job, progress_callback) -> dict[str, Any]:
 
     params = job.params
     image_path = Path(params["image_path"])
+    identity = capture_identity(params.get("image_id", image_path.parent.name), image_path)
+    expected = params.get("image_identity")
+    if expected and expected != identity:
+        raise ValueError("Fotografija ne odgovara identitetu zabilježenom pri slanju detekcije")
     output_dir = settings.outputs_dir / job.id
 
     detections = infer_tiled(
@@ -48,7 +53,11 @@ def run_detection(job: Job, progress_callback) -> dict[str, Any]:
     overlay_path = output_dir / f"{image_stem}_overlay.jpg"
     metadata_path = output_dir / f"{image_stem}_metadata.json"
 
+    if capture_identity(identity["image_id"], image_path) != identity:
+        raise ValueError("Fotografija je promijenjena tijekom detekcije")
     return {
+        "image_id": identity["image_id"],
+        "image_identity": identity,
         "num_detections": len(detections),
         "csv_path": str(csv_path),
         "overlay_path": str(overlay_path),

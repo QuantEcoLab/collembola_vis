@@ -6,7 +6,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response as APIResponse
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -123,8 +123,13 @@ async def create_project(
 
 
 @router.get("")
-async def list_projects():
-    return db_projects.list_projects()
+def list_projects(response: APIResponse):
+    # SQLite/lock waits run in FastAPI's thread pool, not on the ASGI event loop.
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return db_projects.list_projects()
+    except db_projects.ProjectsDatabaseBusy as exc:
+        raise HTTPException(503, str(exc), headers={"Retry-After": "2", "Cache-Control": "no-store"}) from exc
 
 
 @router.get("/{project_id}")

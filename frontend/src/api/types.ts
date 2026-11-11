@@ -10,6 +10,7 @@ export interface ImageInfo {
 }
 
 export interface CalibrationResult {
+  image_id?: string
   um_per_pixel: number | null
   ruler_px?: number
   tick_spacing_px?: number
@@ -32,7 +33,7 @@ export interface JobResult {
 
 export interface Job {
   id: string
-  type: 'detection' | 'measurement' | 'calibration' | 'batch' | 'batch_measure' | 'batch_process' | 'finetune'
+  type: 'detection' | 'measurement' | 'calibration' | 'batch' | 'batch_measure' | 'batch_process' | 'finetune' | 'contours'
   status: 'pending' | 'running' | 'completed' | 'failed'
   progress: number
   message: string
@@ -116,4 +117,46 @@ export interface MeasurementRequest {
   method?: 'fast' | 'sam'
   device?: string
   use_annotations?: boolean
+}
+
+export interface ContourRequest {
+  image_id: string
+  detection_job_id?: string
+  source_contour_job_id?: string
+  um_per_pixel: number | null
+}
+
+export interface VolumeSummary {
+  available: boolean
+  count: number
+  unit: string | null
+  mean: number | null
+  median: number | null
+  min: number | null
+  max: number | null
+  total: number | null
+}
+
+export interface OrganismContour {
+  detection_id: number
+  bbox: [number, number, number, number]
+  contours: [number, number][][]
+}
+
+export interface DetectorDatasetEntry {
+  entry_id: string; revision: number; image_id: string; filename: string
+  image_sha256: string; width: number; height: number; saved_at: string; saved_by: string
+  source: { description: string; resolved_path: string; ingestion: string; exif_date_original: string | null }
+  boxes: (AnnotatedBox & { action: 'added' | 'corrected' | 'confirmed'; original_bbox: Record<string, number> | null })[]
+  removed_detections: { id: string }[]
+  change_counts: { added: number; corrected: number; confirmed: number }
+  split_check: { membership: string; registry_created_at: string }
+}
+export interface DetectorDatasetVersion {
+  version_id: string; parent_version: string | null; created_at: string; created_by: string
+  entries: DetectorDatasetEntry[]
+}
+export interface DetectorDatasetIndex {
+  versions: (Omit<DetectorDatasetVersion, 'entries'> & { image_count: number; box_count: number })[]
+  registry: { created_at: string; roots: string[]; sources: number; images: number } | null
 }

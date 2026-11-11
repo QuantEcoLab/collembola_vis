@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { X, Download } from 'lucide-react'
 import MeasurementTable from './MeasurementTable'
 
@@ -10,6 +10,7 @@ interface Props {
   onRowClick: (rowIndex: number) => void
   onExport: (format: 'csv' | 'excel') => void
   measurementDone: boolean
+  selectionPreview?: ReactNode
 }
 
 export function MeasurementModal({
@@ -20,6 +21,7 @@ export function MeasurementModal({
   onRowClick,
   onExport,
   measurementDone,
+  selectionPreview,
 }: Props) {
   useEffect(() => {
     if (!isOpen) return
@@ -66,12 +68,15 @@ export function MeasurementModal({
         </div>
 
         {/* Table body */}
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 flex">
+          <div className="flex-1 min-w-0">
           <MeasurementTable
             data={data}
             selectedIndex={selectedIndex}
             onRowClick={onRowClick}
           />
+          </div>
+          {selectionPreview && <div className="w-[34%] min-w-64 border-l flex flex-col"><p className="text-xs font-medium p-2">Odabrana kontura na fotografiji</p><div className="flex-1 min-h-0">{selectionPreview}</div></div>}
         </div>
       </div>
     </div>

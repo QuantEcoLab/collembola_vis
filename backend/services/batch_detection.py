@@ -12,6 +12,7 @@ from backend import db_projects
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import Job, JobType
+from backend.services.image_identity import capture_identity
 
 
 def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
@@ -50,6 +51,7 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
         output_dir = settings.outputs_dir / det_job_id
 
         try:
+            identity = capture_identity(image_id, image_path)
             detections = infer_tiled(
                 image_path=image_path,
                 model_path=params.get("model_path", str(settings.default_model)),
@@ -67,12 +69,16 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
             overlay_path = output_dir / f"{image_stem}_overlay.jpg"
             metadata_path = output_dir / f"{image_stem}_metadata.json"
 
+            if capture_identity(image_id, image_path) != identity:
+                raise ValueError("Fotografija je promijenjena tijekom detekcije")
             # Register as a completed DETECTION job so workspace can load it.
             # Pass det_job_id so the job ID matches the output directory.
             sub_job = job_manager.register_completed(
                 JobType.DETECTION,
-                params={"image_path": str(image_path)},
+                params={"image_path": str(image_path), "image_id": image_id, "image_identity": identity},
                 result={
+                    "image_id": image_id,
+                    "image_identity": identity,
                     "num_detections": len(detections),
                     "csv_path": str(csv_path),
                     "overlay_path": str(overlay_path),

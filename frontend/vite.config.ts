@@ -1,12 +1,28 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { previewPlugin } from './previewPlugin'
 
 const stripBase = (path: string) => path.replace(/^\/collembola/, '')
+const localPreview = process.env.VITE_LOCAL_PREVIEW === '1'
+const buildId = process.env.VITE_PREVIEW_BUILD_ID ?? ''
+const builtAt = process.env.VITE_PREVIEW_BUILT_AT ?? ''
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
-  base: '/collembola/',
+  plugins: [react(), tailwindcss(), ...(localPreview ? [previewPlugin(buildId, builtAt)] : [])],
+  define: {
+    __EXP03_LOCAL_PREVIEW__: JSON.stringify(localPreview),
+    __EXP03_BUILD_ID__: JSON.stringify(buildId),
+    __EXP03_BUILT_AT__: JSON.stringify(builtAt),
+  },
+  build: localPreview ? {
+    rollupOptions: { output: {
+      entryFileNames: `assets/${buildId}/[name]-[hash].js`,
+      chunkFileNames: `assets/${buildId}/[name]-[hash].js`,
+      assetFileNames: `assets/${buildId}/[name]-[hash][extname]`,
+    } },
+  } : undefined,
+  base: process.env.VITE_BASE_PATH ?? '/collembola/',
   server: {
     proxy: {
       '/collembola/api': {

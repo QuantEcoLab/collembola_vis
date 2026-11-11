@@ -9,6 +9,7 @@ from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobStatus, JobType
 from backend.services.image import get_image_info
+from backend.services.image_identity import capture_identity
 
 router = APIRouter(prefix="/api/detection", tags=["detection"], dependencies=[Depends(get_current_user)])
 
@@ -30,7 +31,8 @@ async def run_detection(req: DetectionRequest):
     if info is None:
         raise HTTPException(404, "Image not found")
 
-    params = {"image_path": info["path"]}
+    params = {"image_path": info["path"], "image_id": req.image_id,
+              "image_identity": capture_identity(req.image_id, info["path"])}
     if req.model_path:
         params["model_path"] = req.model_path
     if req.conf is not None:

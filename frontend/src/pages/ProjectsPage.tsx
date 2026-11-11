@@ -29,6 +29,8 @@ export default function ProjectsPage() {
   const logout = useAuthStore((s) => s.logout)
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
   const [creating, setCreating] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [newName, setNewName] = useState('')
@@ -39,11 +41,16 @@ export default function ProjectsPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
   useEffect(() => {
-    listProjects()
-      .then(setProjects)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
+    let cancelled = false
+    const controller = new AbortController()
+    setLoading(true)
+    setLoadError(null)
+    listProjects(controller.signal)
+      .then(data => { if (!cancelled) setProjects(data) })
+      .catch(error => { if (!cancelled) setLoadError(error instanceof Error ? error.message : 'Dohvat projekata nije uspio.') })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true; controller.abort() }
+  }, [reload])
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -97,6 +104,7 @@ export default function ProjectsPage() {
             >
               Workspace
             </Link>
+            <Link to="/detector-dataset" className="text-sm px-3 py-1 text-teal-700">Dataset za trening</Link>
           </nav>
         </div>
         <button
@@ -179,9 +187,21 @@ export default function ProjectsPage() {
           )}
 
           {/* Projects grid */}
+          {loadError && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p className="font-semibold">Ne mogu učitati projekte.</p>
+              <p className="mt-1">{loadError}</p>
+              <p className="mt-1">Ova greška ne briše bazu ni postojeće projekte.</p>
+              <button onClick={() => setReload(value => value + 1)} disabled={loading}
+                className="mt-3 rounded border border-red-300 bg-white px-3 py-1.5 font-medium disabled:opacity-50">
+                Pokušaj ponovno
+              </button>
+            </div>
+          )}
           {loading ? (
-            <div className="text-sm text-gray-400 py-12 text-center">Loading…</div>
-          ) : projects.length === 0 ? (
+            <div role="status" className="text-sm text-gray-400 py-12 text-center">Loading…</div>
+          ) : loadError && projects.length === 0 ? null
+          : projects.length === 0 ? (
             <div className="py-20 text-center space-y-2">
               <FolderOpen size={40} className="mx-auto text-gray-300" />
               <p className="text-sm text-gray-500">No projects yet.</p>

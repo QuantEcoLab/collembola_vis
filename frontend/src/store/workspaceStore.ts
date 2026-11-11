@@ -6,9 +6,11 @@ interface WorkspaceState {
   image: ImageInfo | null
   detectionJobId: string | null
   measureJobId: string | null
+  contourJobId: string | null
   setImage: (image: ImageInfo | null) => void
   setDetectionJobId: (id: string | null) => void
   setMeasureJobId: (id: string | null) => void
+  setContourJobId: (id: string | null) => void
   reset: () => void
 }
 
@@ -18,10 +20,12 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       image: null,
       detectionJobId: null,
       measureJobId: null,
+      contourJobId: null,
       setImage: (image) => set({ image }),
       setDetectionJobId: (id) => set({ detectionJobId: id }),
       setMeasureJobId: (id) => set({ measureJobId: id }),
-      reset: () => set({ image: null, detectionJobId: null, measureJobId: null }),
+      setContourJobId: (id) => set({ contourJobId: id }),
+      reset: () => set({ image: null, detectionJobId: null, measureJobId: null, contourJobId: null }),
     }),
     { name: 'workspace' },
   ),
