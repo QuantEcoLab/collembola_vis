@@ -114,7 +114,7 @@ export interface MeasurementRequest {
   image_id: string
   detections_csv: string
   um_per_pixel: number
-  method?: 'fast' | 'sam'
+  method?: 'centerline_circular_sections_v2'
   device?: string
   use_annotations?: boolean
 }
@@ -124,7 +124,10 @@ export interface ContourRequest {
   detection_job_id?: string
   source_contour_job_id?: string
   um_per_pixel: number | null
+  use_annotations?: boolean
 }
+
+export const CENTERLINE_METHOD = 'centerline_circular_sections_v2'
 
 export interface VolumeSummary {
   available: boolean
@@ -135,12 +138,20 @@ export interface VolumeSummary {
   min: number | null
   max: number | null
   total: number | null
+  reliable_count?: number
+  excluded_count?: number
+  candidate_count?: number
+  uncalibrated_count?: number
 }
 
 export interface OrganismContour {
   detection_id: number
   bbox: [number, number, number, number]
   contours: [number, number][][]
+  centerline?: [number, number][]
+  cross_sections?: { left: [number, number] | null; right: [number, number] | null }[]
+  removed_branches?: [number, number][][]
+  measurement_reliable?: boolean
 }
 
 export interface DetectorDatasetEntry {

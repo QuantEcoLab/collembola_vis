@@ -44,8 +44,6 @@ interface Props {
   measurementDone: boolean
   measureJob: Job | null
   measureError: string | null
-  measureMethod: 'fast' | 'sam'
-  setMeasureMethod: (m: 'fast' | 'sam') => void
   onRunMeasurement: () => void
   csvDataLength: number
   onViewResults: () => void
@@ -85,8 +83,6 @@ export function WorkspaceSidebar({
   measurementDone,
   measureJob,
   measureError,
-  measureMethod,
-  setMeasureMethod,
   onRunMeasurement,
   csvDataLength,
   onViewResults,
@@ -216,34 +212,7 @@ export function WorkspaceSidebar({
           <div className="px-4 py-4 space-y-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Measurement</p>
 
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-2 p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="radio"
-                  value="fast"
-                  checked={measureMethod === 'fast'}
-                  onChange={() => setMeasureMethod('fast')}
-                  className="text-blue-600"
-                />
-                <div>
-                  <div className="text-xs font-medium text-gray-900">Fast Ellipse</div>
-                  <div className="text-[10px] text-gray-500">~178 org/sec, recommended</div>
-                </div>
-              </label>
-              <label className="flex items-center gap-2 p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="radio"
-                  value="sam"
-                  checked={measureMethod === 'sam'}
-                  onChange={() => setMeasureMethod('sam')}
-                  className="text-blue-600"
-                />
-                <div>
-                  <div className="text-xs font-medium text-gray-900">SAM Contours</div>
-                  <div className="text-[10px] text-gray-500">~1 org/sec, more accurate</div>
-                </div>
-              </label>
-            </div>
+            <p className="text-xs text-teal-800">Zakrivljena središnja linija · lokalni okomiti presjeci · volumen Σ π(wᵢ/2)²Δlᵢ</p>
 
             <button
               onClick={onRunMeasurement}
@@ -257,8 +226,8 @@ export function WorkspaceSidebar({
               {measureJob?.status === 'running'
                 ? 'Running…'
                 : measurementDone
-                ? 'Re-run Measurement'
-                : 'Run Measurement'}
+                 ? 'Ponovi mjerenje'
+                 : 'Izmjeri duljinu i volumen'}
             </button>
 
             {measureJob && !measurementDone && <JobProgress job={measureJob} />}

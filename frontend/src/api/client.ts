@@ -79,6 +79,20 @@ async function request<T>(path: string, options?: RequestInit, timeoutMs?: numbe
 }
 
 // Images
+export const getContourSource = (imageId: string) =>
+  request<{ job_id: string | null; measurement_method: string | null }>(`/api/contours/source/${imageId}`, { cache: 'no-store' }, 10_000)
+
+export async function getContourOverview(jobId: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await fetch(`${BASE}/api/contours/overview/${jobId}`, { headers: authHeaders(), cache: 'no-store', signal })
+  if (response.status === 401) handle401()
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || `Prikaz kontura nije dostupan (HTTP ${response.status}).`)
+  }
+  return response.blob()
+}
+
+// Images
 export const uploadImage = (
   file: File,
   onProgress?: (pct: number) => void,

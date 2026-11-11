@@ -1,4 +1,4 @@
-"""Measurement service — wraps measurement scripts."""
+"""Compatibility entry point: all app measurements use the centerline method."""
 
 import sys
 from pathlib import Path
@@ -13,83 +13,17 @@ from backend.jobs.models import Job
 
 
 def run_measurement(job: Job, progress_callback) -> dict[str, Any]:
-    """Execute measurement for a job.
-
-    Expected job.params:
-        image_path: str
-        detections_csv: str
-        um_per_pixel: float
-        method: str ('fast' or 'sam', default 'fast')
-        device: str (optional, for SAM)
-    """
+    """Reuse same-photo exp03 masks or segment reviewed boxes, never old axes."""
+    from backend.services.contours import annotation_snapshot, find_saved_source, run_contours
     params = job.params
-    image_path = Path(params["image_path"])
-    detections_csv = Path(params["detections_csv"])
-    method = params.get("method", "fast")
-
-    output_dir = settings.outputs_dir / job.id
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_csv = output_dir / f"{image_path.stem}_measurements.csv"
-
-    um_per_pixel = params["um_per_pixel"]
-
-    if method == "sam":
-        from scripts.measure_organisms import measure_organisms, _normalize_device
-
-        sam_device = _normalize_device(params.get("device", "cuda"))
-        df, overlay_path = measure_organisms(
-            image_path=image_path,
-            detections_csv=detections_csv,
-            output_csv=output_csv,
-            um_per_pixel=um_per_pixel,
-            device=sam_device,
-            progress_callback=progress_callback,
-        )
-    else:
-        from scripts.measure_organisms_fast import measure_organisms_fast
-
-        df = measure_organisms_fast(
-            image_path=image_path,
-            detections_csv=detections_csv,
-            output_csv=output_csv,
-            um_per_pixel=um_per_pixel,
-            progress_callback=progress_callback,
-        )
-
-    result: dict = {
-        "num_organisms": len(df),
-        "csv_path": str(output_csv),
-        "method": method,
-        "image_path": str(image_path),
-        "image_stem": image_path.stem,
-    }
-    if method == "sam" and overlay_path is not None:
-        result["overlay_path"] = str(overlay_path)
-    if method != "sam":
-        trunk_overlay = output_dir / f"{image_path.stem}_trunk_overlay.jpg"
-        trunk_debug = output_dir / f"{image_path.stem}_trunk_debug_panels.jpg"
-        trunk_contours = output_dir / f"{output_csv.stem}_trunk_contours.json"
-        trunk_masks = output_dir / f"{output_csv.stem}_trunk_masks.npz"
-        if trunk_overlay.exists():
-            result["trunk_overlay_path"] = str(trunk_overlay)
-        if trunk_debug.exists():
-            result["trunk_debug_panels_path"] = str(trunk_debug)
-        if trunk_contours.exists():
-            result["trunk_contours_path"] = str(trunk_contours)
-        if trunk_masks.exists():
-            result["trunk_masks_path"] = str(trunk_masks)
-
-    result.update({
-        "summary": {
-            col: {
-                "mean": round(float(df[col].mean()), 4),
-                "median": round(float(df[col].median()), 4),
-                "min": round(float(df[col].min()), 4),
-                "max": round(float(df[col].max()), 4),
-            }
-            for col in df.select_dtypes(include="number").columns
-            if col not in ("detection_id", "class")
-        },
-    })
-
-    return result
+    params.setdefault("image_id", Path(params["image_path"]).parent.name)
+    if params.get("use_annotations") and "annotation_snapshot" not in params:
+        snapshot, digest = annotation_snapshot(params["image_id"])
+        if snapshot is None:
+            raise ValueError("Nema spremljenih ručnih oznaka")
+        params.update(annotation_snapshot=snapshot, annotations_sha256=digest)
+    if not params.get("source_contour_job_id"):
+        source = find_saved_source(params["image_id"])
+        if source:
+            params["source_contour_job_id"] = source["id"]
+    return run_contours(job, progress_callback)

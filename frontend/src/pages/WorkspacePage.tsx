@@ -15,7 +15,6 @@ import SaveDetectorDataset from '../components/SaveDetectorDataset'
 import BoxCoordinateEditor from '../components/BoxCoordinateEditor'
 import {
   runDetection,
-  runMeasurement,
   manualCalibrate,
   getCalibration,
   imageUrl,
@@ -25,6 +24,8 @@ import {
   getImage,
   getJob,
   runContours,
+  getContourSource,
+  getContourOverview,
 } from '../api/client'
 import { useJobProgress } from '../hooks/useJob'
 import { useRefinement } from '../hooks/useRefinement'
@@ -33,6 +34,7 @@ import { useAuthStore } from '../store/authStore'
 import { useWorkspaceStore } from '../store/workspaceStore'
 import { useProjectStore } from '../store/projectStore'
 import type { ImageInfo, ProjectImage, OrganismContour, VolumeSummary } from '../api/types'
+import { CENTERLINE_METHOD } from '../api/types'
 
 type ModalType = 'advanced-detection' | 'finetune' | null
 type Point = [number, number]
@@ -102,7 +104,6 @@ export default function WorkspacePage() {
   )
 
   // ── Measurement ─────────────────────────────────────────────────────
-  const [measureMethod, setMeasureMethod] = useState<'fast' | 'sam'>('fast')
   const [measureJobId, setMeasureJobIdState] = useState<string | null>(
     workspaceStore.measureJobId
   )
@@ -113,7 +114,7 @@ export default function WorkspacePage() {
   const [measureError, setMeasureError] = useState<string | null>(null)
   const measureJob = useJobProgress(measureJobId)
   const [csvData, setCsvData] = useState<Record<string, any>[] | null>(null)
-  const measurementDone = measureJob?.status === 'completed'
+  const measurementDone = measureJob?.status === 'completed' && measureJob.result?.measurement_method === CENTERLINE_METHOD && measureJob.result.image_id === image?.image_id
 
   // ── Fixed experimental contours + automatic existing mask measurement ──
   const [contourJobId, setContourJobIdState] = useState<string | null>(workspaceStore.contourJobId ?? null)
@@ -122,12 +123,14 @@ export default function WorkspacePage() {
   const activeImageRef = useRef(image?.image_id)
   activeImageRef.current = image?.image_id
   const [contourError, setContourError] = useState<string | null>(null)
+  const [availableContourSource, setAvailableContourSource] = useState<string | null>(null)
   const [organismContours, setOrganismContours] = useState<OrganismContour[]>([])
   const [selectedContourId, setSelectedContourId] = useState<number | null>(null)
   const contourJob = useJobProgress(contourJobId)
   const contourBusy = contourSubmitting || (contourJobId != null && (!contourJob || contourJob.status === 'pending' || contourJob.status === 'running'))
   const contourCalibration = image ? calStore.imageUmPerPixel?.[image.image_id] ?? null : null
-  const isExperimentalMeasurement = measureJob?.type === 'contours' && measureJob.result?.model_name === 'exp03_no_os' && measureJob.result.image_id === image?.image_id
+  const isExperimentalMeasurement = measurementDone
+  const needsCurrentMeasurement = measureJob?.status === 'completed' && !measurementDone
   const calibrationMatchesResult = !isExperimentalMeasurement || (measureJob?.result.calibration_um_per_px ?? null) === contourCalibration
   const volumeSummary = isExperimentalMeasurement && calibrationMatchesResult ? measureJob?.result.volume_summary as VolumeSummary : null
   const selectedContour = useMemo(() => organismContours.find(c => c.detection_id === selectedContourId) ?? null, [organismContours, selectedContourId])
@@ -141,8 +144,9 @@ export default function WorkspacePage() {
     setContourSubmitting(true)
     setContourError(null)
     try {
-      const cachedSource = sourceContourJobId ?? (isExperimentalMeasurement && !calibrationMatchesResult ? measureJob?.id : undefined)
+      const cachedSource = sourceContourJobId ?? availableContourSource ?? (measureJob?.result?.model_name === 'exp03_no_os' && measureJob.result.image_id === imageId && measureJob.result.mask_records_path ? measureJob.id : undefined)
       const response = await runContours({ image_id: imageId, um_per_pixel: contourCalibration,
+        ...(refinement.annotationsSaved ? { use_annotations: true } : {}),
         ...(cachedSource ? { source_contour_job_id: cachedSource } : detectionJobId && detectionDone ? { detection_job_id: detectionJobId } : {}),
       })
       if (activeImageRef.current !== imageId) return
@@ -154,7 +158,14 @@ export default function WorkspacePage() {
       contourSubmitLock.current = false
       setContourSubmitting(false)
     }
-  }, [image, contourBusy, contourCalibration, detectionJobId, detectionDone, workspaceStore.setContourJobId, isExperimentalMeasurement, calibrationMatchesResult, measureJob?.id])
+  }, [image, contourBusy, contourCalibration, detectionJobId, detectionDone, workspaceStore.setContourJobId, availableContourSource, refinement.annotationsSaved, measureJob?.id, measureJob?.result])
+
+  useEffect(() => {
+    let cancelled = false
+    setAvailableContourSource(null)
+    if (image) getContourSource(image.image_id).then(data => { if (!cancelled) setAvailableContourSource(data.job_id) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [image?.image_id])
 
   useEffect(() => {
     if (!contourJobId) return
@@ -171,7 +182,8 @@ export default function WorkspacePage() {
 
   useEffect(() => {
     if (contourJob?.status === 'failed') setContourError(`Izrada kontura i mjerenja nije uspjela: ${contourJob.error ?? 'nepoznata greška'}`)
-    if (contourJob?.status !== 'completed' || contourJob.result.image_id !== image?.image_id) return
+    if (contourJob?.status !== 'completed' || contourJob.result.image_id !== image?.image_id || contourJob.result.measurement_method !== CENTERLINE_METHOD) return
+    setAvailableContourSource(contourJob.id)
     if (measureJobId !== contourJob.id) {
       setMeasureJobId(contourJob.id)
       setOverlayMode('contours')
@@ -257,14 +269,21 @@ export default function WorkspacePage() {
   const hasNext = currentSiblingIndex >= 0 && currentSiblingIndex < siblingImages.length - 1
 
   // ── Derived State ───────────────────────────────────────────────────
-  const contourOverlayUrl = useMemo(() => {
-    if (!measurementDone || !measureJob?.result) return null
-    const overlayPath = measureJob.result.trunk_overlay_path ?? measureJob.result.overlay_path
-    if (typeof overlayPath !== 'string') return null
-    const filename = basename(overlayPath)
-    if (!filename) return null
-    return outputFileUrl(measureJob.id, filename)
-  }, [measurementDone, measureJob])
+  const [contourOverlayUrl, setContourOverlayUrl] = useState<string | null>(null)
+  useEffect(() => {
+    const controller = new AbortController()
+    let url: string | null = null
+    setContourOverlayUrl(null)
+    if (measurementDone && measureJob) {
+      getContourOverview(measureJob.id, controller.signal).then(blob => {
+        if (!controller.signal.aborted) {
+          url = URL.createObjectURL(blob)
+          setContourOverlayUrl(url)
+        }
+      }).catch(error => { if (!controller.signal.aborted) setContourError(error.message) })
+    }
+    return () => { controller.abort(); if (url) URL.revokeObjectURL(url) }
+  }, [measurementDone, measureJob?.id])
   const hasContourOverlay = contourOverlayUrl !== null
 
   // Determine which image to show based on overlay mode
@@ -325,32 +344,7 @@ export default function WorkspacePage() {
       setCsvData(calibrationMatchesResult ? measureJob.result.measurements as Record<string, any>[] : null)
       return
     }
-    let cancelled = false
-    if (measureJob?.status === 'completed' && measureJob.result?.csv_path) {
-      const filename = basename(measureJob.result.csv_path as string)
-      if (!filename) return
-      fetch(outputFileUrl(measureJob.id, filename))
-        .then((r) => r.text())
-        .then((text) => {
-          const lines = text.trim().split('\n')
-          if (lines.length < 2) return
-          const headers = lines[0].split(',').map((h) => h.trim())
-          if (!cancelled) setCsvData(
-            lines.slice(1).map((line) => {
-              const vals = line.split(',')
-              const row: Record<string, unknown> = {}
-              headers.forEach((h, i) => {
-                const raw = vals[i]?.trim() ?? ''
-                const n = Number(raw)
-                row[h] = raw !== '' && !isNaN(n) ? n : raw
-              })
-              return row
-            })
-          )
-        })
-        .catch((e) => console.error('[WorkspacePage] Failed to load measurement CSV', e))
-    }
-    return () => { cancelled = true }
+    setCsvData(null)
   }, [measureJob?.status, measureJob?.result?.csv_path, measureJob?.id, isExperimentalMeasurement, calibrationMatchesResult])
 
   // Auto-sync job IDs to project
@@ -572,26 +566,8 @@ export default function WorkspacePage() {
   }
 
   const handleRunMeasurement = async () => {
-    if (!image || !detectionJob?.result?.csv_path) return
     setMeasureError(null)
-    if (contourCalibration == null) {
-      setMeasureError('Unesite ili potvrdite kalibraciju za ovu fotografiju. Gumb Napravi konture omogućuje pikselne mjere bez kalibracije.')
-      return
-    }
-    setCsvData(null)
-    try {
-      const res = await runMeasurement({
-        image_id: image.image_id,
-        detections_csv: detectionJob.result.csv_path,
-        um_per_pixel: contourCalibration,
-        method: measureMethod,
-        device,
-        use_annotations: refinement.annotationsSaved,
-      })
-      setMeasureJobId(res.job_id)
-    } catch (e: any) {
-      setMeasureError(e.message)
-    }
+    await submitContours()
   }
 
   const handleReset = () => {
@@ -629,6 +605,10 @@ export default function WorkspacePage() {
 
   const handleExport = (format: 'image' | 'csv' | 'excel') => {
     if (!measureJob || !measureJob.result) return
+    if (format !== 'image' && !isExperimentalMeasurement) {
+      setContourError('Najprije izračunajte rezultate središnjom linijom.')
+      return
+    }
     if (format !== 'image' && isExperimentalMeasurement && !calibrationMatchesResult) {
       setContourError('Mjerenja se ponovno računaju za novu kalibraciju. Pričekajte dovršetak prije izvoza.')
       return
@@ -797,9 +777,7 @@ export default function WorkspacePage() {
                   boxes={refinement.boxes} disabled={refinement.isLoading || !!refinement.error || (!!detectionJobId && !detectionDone)} />}
                 measurementDone={measurementDone}
                 measureJob={measureJob ?? null}
-                measureError={measureError}
-                measureMethod={measureMethod}
-                setMeasureMethod={setMeasureMethod}
+                measureError={needsCurrentMeasurement ? 'Za prikaz rezultata pokrenite mjerenje središnjom linijom. Odgovarajuće spremljene maske ponovno će se koristiti.' : measureError}
                 onRunMeasurement={handleRunMeasurement}
                 csvDataLength={csvData?.length ?? 0}
                 onViewResults={() => setShowMeasurementModal(true)}
@@ -873,9 +851,8 @@ export default function WorkspacePage() {
                 className="h-full"
                 focusBox={selectedContourBox}
                 onImageClick={calibrationMode ? handleCalibrationClick : undefined}
-                transformOverlay={(showBboxOverlay || calibrationPoints.length > 0 || (selectedContour && overlayMode !== 'raw')) ? (
+                transformOverlay={(showBboxOverlay || calibrationPoints.length > 0) ? (
                   <>
-                    {!calibrationMode && overlayMode !== 'raw' && selectedContour && <ContourHighlight contour={selectedContour} width={image.width} height={image.height} />}
                     {showBboxOverlay && (
                       <BboxOverlay
                         boxes={refinement.boxes}
@@ -1089,7 +1066,7 @@ export default function WorkspacePage() {
         onExport={(fmt) => handleExport(fmt)}
         measurementDone={measurementDone && calibrationMatchesResult}
         selectionPreview={isExperimentalMeasurement && image && selectedContour ? (
-          <ImageViewer src={viewerSrc} alt="Odabrana exp03 kontura" className="h-full" focusBox={selectedContourBox}
+          <ImageViewer src={imageUrl(image.image_id, image.filename)} alt="Odabrana exp03 kontura" className="h-full" focusBox={selectedContourBox}
             transformOverlay={<ContourHighlight contour={selectedContour} width={image.width} height={image.height} />} />
         ) : undefined}
       />

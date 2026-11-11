@@ -10,6 +10,7 @@ import {
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { ArrowUpDown, Columns3 } from 'lucide-react'
 import { formatVolume } from './VolumeSummary'
+import { CENTERLINE_METHOD } from '../api/types'
 
 // Columns hidden by default — raw pixel coords and metadata noise
 const DEFAULT_HIDDEN = new Set([
@@ -28,19 +29,20 @@ interface MeasurementRow {
 
 const EXP_HEADERS: Record<string, string> = {
   detection_id: 'Detection ID', segmentation_confidence: 'Seg. confidence', volume_mm3: 'Procijenjeni volumen (mm³)',
-  volume_unit: 'Jedinica volumena', length_mm: 'Duljina (mm)', width_mm: 'Najveća širina elipse (mm)',
-  length_px: 'Duljina (px)', width_px: 'Najveća širina elipse (px)', area_px: 'Površina (px²)', area_mm2: 'Površina (mm²)',
+  volume_unit: 'Jedinica volumena', length_mm: 'Zakrivljena duljina (mm)', width_mm: 'Medijan lokalne širine (mm)',
+  length_px: 'Zakrivljena duljina (px)', width_px: 'Medijan lokalne širine (px)', area_px: 'Površina tijela (px²)', area_mm2: 'Površina tijela (mm²)',
+  measurement_status: 'Pouzdanost', measurement_reliable: 'Pouzdano', volume_included: 'U ukupnom volumenu',
   perimeter_px: 'Opseg (px)', perimeter_mm: 'Opseg (mm)', calibration_um_per_px: 'Kalibracija (µm/px)',
   dedup_status: 'Dedup', touches_crop_edge: 'Dodir ruba cropa', warning: 'Upozorenje',
 }
 
 function defaultVisibility(data: MeasurementRow[]): VisibilityState {
   if (!data.length) return {}
-  const experimental = data[0].model_name === 'exp03_no_os'
+  const experimental = data[0].measurement_method === CENTERLINE_METHOD
   if (!experimental) return Object.fromEntries(Object.keys(data[0]).map(k => [k, !DEFAULT_HIDDEN.has(k)]))
   const calibrated = typeof data[0].calibration_um_per_px === 'number'
   const metrics = calibrated ? ['length_mm', 'width_mm', 'area_mm2', 'perimeter_mm'] : ['length_px', 'width_px', 'area_px', 'perimeter_px']
-  const shown = new Set(['detection_id', 'segmentation_confidence', 'volume_mm3', ...metrics,
+  const shown = new Set(['detection_id', 'volume_mm3', 'measurement_status', 'volume_included', ...metrics,
     'calibration_um_per_px', 'dedup_status', 'touches_crop_edge', 'warning'])
   return Object.fromEntries(Object.keys(data[0]).map(k => [k, shown.has(k)]))
 }
@@ -59,7 +61,7 @@ export default function MeasurementTable({ data, selectedIndex, onRowClick }: Pr
 
   // Column visibility — initialised once from data keys
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => defaultVisibility(data))
-  const experimental = data[0]?.model_name === 'exp03_no_os'
+  const experimental = data[0]?.measurement_method === CENTERLINE_METHOD
   const schemaKey = Object.keys(data[0] ?? {}).join('|') + String(experimental) + String(typeof data[0]?.calibration_um_per_px)
   const previousSchema = useRef(schemaKey)
   useEffect(() => {
@@ -84,7 +86,9 @@ export default function MeasurementTable({ data, selectedIndex, onRowClick }: Pr
   const columns = useMemo(() => {
     if (!data.length) return []
     const helper = createColumnHelper<MeasurementRow>()
-    return Object.keys(data[0]).map((key) =>
+    const priority = ['detection_id', 'measurement_status', 'volume_included', 'length_mm', 'length_px', 'volume_mm3', 'width_mm', 'width_px', 'warning']
+    const position = (key: string) => { const index = priority.indexOf(key); return index < 0 ? 100 : index }
+    return Object.keys(data[0]).sort((a, b) => position(a) - position(b)).map((key) =>
       helper.accessor(key, {
         id: key,
         header: experimental ? EXP_HEADERS[key] ?? key : key,
@@ -126,6 +130,7 @@ export default function MeasurementTable({ data, selectedIndex, onRowClick }: Pr
   }, [selectedIndex, table])
 
   if (!data.length) return <p className="text-sm text-gray-500 p-4">No data</p>
+  if (!experimental) return <p className="text-sm text-amber-800 p-4">Za prikaz rezultata pokrenite mjerenje središnjom linijom.</p>
 
   const visibleCount = table.getVisibleFlatColumns().length
   const totalCount = table.getAllColumns().length
@@ -135,7 +140,7 @@ export default function MeasurementTable({ data, selectedIndex, onRowClick }: Pr
       {/* Toolbar */}
       <div className="flex items-center justify-between px-3 py-1.5 border-b bg-gray-50 shrink-0">
         <span className="text-xs text-gray-500">
-          {data.length} organisms · {visibleCount}/{totalCount} columns
+          {data.length} organisms · {visibleCount}/{totalCount} columns · Nepouzdane procjene ne ulaze u ukupni volumen.
         </span>
         <div className="relative" ref={colMenuRef}>
           <button
@@ -215,13 +220,14 @@ export default function MeasurementTable({ data, selectedIndex, onRowClick }: Pr
                   key={row.id}
                   onClick={() => onRowClick?.(row.index)}
                   className={`${
-                    isSelected ? 'bg-amber-50' : 'hover:bg-gray-50'
+                    isSelected ? 'bg-amber-50' : row.original.measurement_reliable === false ? 'bg-orange-50 text-orange-950' : 'hover:bg-gray-50'
                   } ${onRowClick ? 'cursor-pointer' : ''}`}
                 >
                   {row.getVisibleCells().map((cell, ci) => (
                     <td
                       key={cell.id}
-                      className={`px-3 py-1.5 whitespace-nowrap ${experimental && cell.column.id === 'volume_mm3' ? 'bg-violet-50 text-violet-950 font-bold text-base ' : ''}${
+                      title={cell.column.id === 'volume_mm3' && row.original.measurement_reliable === false ? 'Dijagnostička procjena — isključena iz ukupnog volumena' : undefined}
+                      className={`px-3 py-1.5 whitespace-nowrap ${experimental && cell.column.id === 'volume_mm3' ? row.original.measurement_reliable === false ? 'bg-orange-100 text-orange-950 ' : 'bg-violet-50 text-violet-950 font-bold text-base ' : ''}${
                         isSelected
                           ? `text-amber-900 font-medium${ci === 0 ? ' border-l-2 border-amber-400' : ''}`
                           : ''

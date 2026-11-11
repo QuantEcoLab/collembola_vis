@@ -17,7 +17,7 @@ from backend.config import settings
 from backend.jobs.models import Job, JobStatus, JobType
 from backend.routers import contours as router_module
 from backend.services import contours as service
-from scripts.measure_organisms import measure_organism_from_mask
+from scripts.experimental_centerline import analyze
 
 
 @pytest.fixture
@@ -136,20 +136,21 @@ def mask_record(index, mask, *, kept=True, available=True):
             "kept_after_dedup": kept, "has_mask": available, "segmentation_confidence": .9}
 
 
-def test_only_kept_nonempty_masks_use_existing_axes_and_cylinder_formula(isolated):
+def test_only_kept_nonempty_masks_use_approved_centerline_and_local_sections(isolated):
     mask = np.zeros((40, 30), dtype=np.uint8)
     mask[5:34, 7:22] = 255
     rows = [mask_record(17, mask), mask_record(18, mask, kept=False), mask_record(19, np.zeros_like(mask), available=False)]
     measured, summary = service.measure_final_masks(rows, 8.57)
     assert len(measured) == summary["count"] == 1
     assert measured[0]["detection_id"] == 17
-    existing = measure_organism_from_mask(mask > 0, 8.57, [0, 0, 30, 40])
-    assert measured[0]["length_px"] == existing["major_axis_px"]
-    assert measured[0]["width_px"] == existing["minor_axis_px"]
-    assert measured[0]["volume_mm3"] == pytest.approx(existing["volume_um3"] / 1e9)
-    assert measured[0]["volume_mm3"] == pytest.approx(np.pi * (measured[0]["width_mm"] / 2) ** 2 * measured[0]["length_mm"])
+    approved = analyze(mask > 0, 8.57)
+    assert measured[0]["length_px"] == approved["length_px"]
+    assert measured[0]["width_px"] == approved["width_median_px"]
+    assert measured[0]["volume_mm3"] == pytest.approx(approved["volume_mm3"])
+    assert measured[0]["volume_mm3"] == pytest.approx(sum(np.pi * (s["width_px"] / 2)**2 * s["delta_l_px"] for s in approved["cross_sections"]) * (.00857)**3)
     assert summary["total"] == measured[0]["volume_mm3"]
-    assert measured[0]["centroid_x_px"] == existing["centroid_x_px"] + 100
+    assert measured[0]["measurement_method"] == "centerline_circular_sections_v2"
+    assert measured[0]["volume_included"]
 
 
 def test_no_calibration_has_pixel_measures_and_no_invented_physical_volume(isolated):
@@ -239,8 +240,8 @@ def test_degenerate_mask_does_not_invent_zero_physical_volume(isolated):
     mask[2, 2] = 255
     rows, summary = service.measure_final_masks([mask_record(3, mask)], 8.57)
     assert rows[0]["volume_mm3"] is None
-    assert "Degenerirane" in rows[0]["warning"]
-    assert summary["count"] == 0 and summary["total"] is None
+    assert not rows[0]["measurement_reliable"]
+    assert summary["count"] == 0 and summary["total"] == 0
 
 
 def test_worker_reuses_detector_crops_dedup_and_measures_only_final_masks(isolated, monkeypatch):
@@ -288,7 +289,9 @@ def test_worker_reuses_detector_crops_dedup_and_measures_only_final_masks(isolat
     assert calls[0][0] == (29, 21, 3)  # Legacy floor/ceil, no additional padding.
     assert all(kwargs == {"imgsz": 320, "conf": .15, "device": "cpu", "verbose": False} for _, kwargs in calls)
     assert [row["detection_id"] for row in result["measurements"]] == [0]
-    assert result["num_organisms"] == result["volume_summary"]["count"] == 1
+    assert result["num_organisms"] == 1
+    assert result["volume_summary"]["count"] == 0  # Full-crop mask is unreliable.
+    assert result["volume_summary"]["excluded_count"] == 1
     assert result["pipeline"]["kept_boxes"] == 2 and result["pipeline"]["without_mask"] == 1
     assert result["measurements"][0]["touches_crop_edge"]
     assert not result["gt_saved"] and not list(settings.annotations_dir.iterdir())

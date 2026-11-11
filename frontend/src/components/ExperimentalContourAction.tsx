@@ -13,8 +13,8 @@ interface Props {
 export default function ExperimentalContourAction({ busy, job, error, calibration, onRun }: Props) {
   return (
     <div data-testid="experimental-contour-action" className="shrink-0 px-4 pb-4 pt-3 border-t border-violet-200 bg-violet-50">
-      <p className="text-xs font-semibold text-violet-900">Eksperimentalni model exp03_no_os</p>
-      <p className="text-[11px] text-violet-800 mt-1">Konture → postojeći dedup → automatsko mjerenje. Izlaz modela nije GT oznaka.</p>
+      <p className="text-xs font-semibold text-violet-900">Model exp03_no_os · središnja linija</p>
+      <p className="text-[11px] text-violet-800 mt-1">Zakrivljena duljina i integracija lokalnih širina. Nepouzdane maske ne ulaze u ukupni volumen.</p>
       {calibration == null && <p className="text-[11px] text-amber-800 mt-1">Kalibracija za ovu fotografiju nije potvrđena. Mjere će biti u pikselima; volumen nije dostupan bez kalibracije.</p>}
       {busy && job && <JobProgress job={job} />}
       {busy && !job && <p role="status" className="text-xs mt-2">Pokretanje obrade…</p>}

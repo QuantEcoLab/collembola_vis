@@ -6,13 +6,15 @@ import threading
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from backend.auth import get_current_user
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobStatus, JobType
-from backend.services.contours import MODEL_NAME, EXP03_SHA256, validate_checkpoint
+from backend.services.contours import MODEL_NAME, EXP03_SHA256, validate_checkpoint, annotation_snapshot, find_saved_source
+from backend.services.centerline_measurement import METHOD
 from backend.services.image import get_image_info
 
 router = APIRouter(prefix="/api/contours", tags=["experimental-contours"], dependencies=[Depends(get_current_user)])
@@ -25,6 +27,7 @@ class ContourRequest(BaseModel):
     detection_job_id: str | None = None
     source_contour_job_id: str | None = None
     um_per_pixel: float | None = None
+    use_annotations: bool = False
 
     @field_validator("um_per_pixel", mode="before")
     @classmethod
@@ -40,7 +43,30 @@ async def contour_model():
         validate_checkpoint()
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
-    return {"name": MODEL_NAME, "experimental": True, "sha256": EXP03_SHA256}
+    return {"name": MODEL_NAME, "measurement_method": METHOD, "experimental": False, "sha256": EXP03_SHA256}
+
+
+@router.get("/source/{image_id}")
+def saved_source(image_id: str):
+    source = find_saved_source(image_id)
+    return {"job_id": source["id"] if source else None,
+            "measurement_method": source["result"].get("measurement_method") if source else None}
+
+
+@router.get("/overview/{job_id}")
+def outer_contour_overview(job_id: str):
+    """Display-only JPEG from original pixels and external saved-mask contours."""
+    from backend.services.contour_display import outer_contour_jpeg
+    job = job_manager.get(job_id)
+    if job is None or job.status != JobStatus.COMPLETED or job.result.get("model_name") != MODEL_NAME:
+        raise HTTPException(404, "Dovršene konture nisu dostupne.")
+    try:
+        content = outer_contour_jpeg(job.result)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return Response(content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.post("/run")
@@ -79,9 +105,19 @@ async def run_contours(req: ContourRequest):
             raise HTTPException(400, "Detekcije ne koriste postojeći zadani detector.")
     if req.source_contour_job_id:
         source = job_manager.get(req.source_contour_job_id)
-        if source is None or source.type != JobType.CONTOURS or source.status != JobStatus.COMPLETED or source.result.get("image_id") != req.image_id or source.result.get("model_name") != MODEL_NAME or source.result.get("checkpoint_sha256") != EXP03_SHA256:
+        if source is None or source.type not in (JobType.CONTOURS, JobType.MEASUREMENT) or source.status != JobStatus.COMPLETED or source.result.get("image_id") != req.image_id or source.result.get("model_name") != MODEL_NAME or source.result.get("checkpoint_sha256") != EXP03_SHA256:
             raise HTTPException(400, "Nema dovršenih exp03 kontura za ovu fotografiju.")
     params = {"image_id": req.image_id, "image_path": info["path"], "um_per_pixel": req.um_per_pixel}
+    if req.use_annotations:
+        snapshot, digest = annotation_snapshot(req.image_id)
+        if snapshot is None:
+            raise HTTPException(400, "Najprije spremite ručne oznake.")
+        if snapshot.get("image_filename") != info.get("filename"):
+            raise HTTPException(400, "Naziv fotografije u spremljenim oznakama ne odgovara fotografiji.")
+        for b in snapshot["boxes"]:
+            if b["status"] != "rejected" and not (0 <= b["x1"] < b["x2"] <= info["width"] and 0 <= b["y1"] < b["y2"] <= info["height"]):
+                raise HTTPException(400, "Spremljeni pravokutnik nije unutar fotografije.")
+        params.update(annotation_snapshot=snapshot, annotations_sha256=digest)
     if req.detection_job_id:
         params["detection_job_id"] = req.detection_job_id
     if req.source_contour_job_id:
@@ -89,4 +125,4 @@ async def run_contours(req: ContourRequest):
     with _submission_lock:
         active = next((job for job in job_manager.list_jobs() if job.type == JobType.CONTOURS and job.params.get("image_id") == req.image_id and job.status in [JobStatus.PENDING, JobStatus.RUNNING]), None)
         job = active or job_manager.submit(JobType.CONTOURS, params)
-    return {"job_id": job.id, "status": job.status.value, "model_name": MODEL_NAME, "experimental": True}
+    return {"job_id": job.id, "status": job.status.value, "model_name": MODEL_NAME, "measurement_method": METHOD, "experimental": False}

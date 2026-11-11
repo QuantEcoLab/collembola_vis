@@ -76,7 +76,7 @@ export function MeasurementModal({
             onRowClick={onRowClick}
           />
           </div>
-          {selectionPreview && <div className="w-[34%] min-w-64 border-l flex flex-col"><p className="text-xs font-medium p-2">Odabrana kontura na fotografiji</p><div className="flex-1 min-h-0">{selectionPreview}</div></div>}
+          {selectionPreview && <div className="w-[34%] min-w-64 border-l flex flex-col"><p className="text-xs font-medium p-2">Odabrano tijelo, središnja linija i lokalne širine</p><div className="flex-1 min-h-0">{selectionPreview}</div></div>}
         </div>
       </div>
     </div>
