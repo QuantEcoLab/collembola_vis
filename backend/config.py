@@ -33,10 +33,13 @@ class Settings(BaseSettings):
     default_extra_tile_sizes: list[int] = []
     default_extra_conf: list[float] = []
     default_contain: float | None = 0.8
+    # A contained box is kept when its confidence is at least that of every box containing it: one box
+    # spanning two touching animals must not remove the animals' own boxes (fragments score lower).
+    default_contain_keep_confident: bool = True
 
     # Legacy detector (until 2026-11): conf 0.6, 1280 tiles only, no fragment suppression. Detection
-    # jobs created before the profile was recorded used it, and the exp03 contour pipeline keeps it
-    # for its own detector run (measurement of photos that have no detection job).
+    # jobs created before the profile was recorded used it. exp03 accepts boxes of either profile; its
+    # own detector run (photos without a detection job) uses the standard profile.
     legacy_model: Path = Path("models/yolo11n_tiled_best.pt")
 
     # Experimental contour workflow; production detector/model defaults above stay intact.

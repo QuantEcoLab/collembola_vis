@@ -31,6 +31,11 @@ interface UseRefinementResult {
   saveAnnotations: (imageId: string, imageFilename: string, detectionJobId: string) => Promise<void>
   isSaving: boolean
   annotationsSaved: boolean
+  /**
+   * The boxes on screen were changed (edit, merge, community load) and not saved yet. Measuring would
+   * ignore these changes (it uses the saved file or the detection job), so it must wait for Save.
+   */
+  hasUnsavedEdits: boolean
   /** source_job_id from the annotation file that was auto-restored (null if not from file) */
   restoredSourceJobId: string | null
   /**
@@ -58,6 +63,7 @@ export function useRefinement(
   const [drawStart, setDrawStart] = useState<{ x: number; y: number } | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [annotationsSaved, setAnnotationsSaved] = useState(false)
+  const [hasUnsavedEdits, setHasUnsavedEdits] = useState(false)
   const [restoredSourceJobId, setRestoredSourceJobId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // Photo the box state belongs to. Everything returned below is gated on it, so the
@@ -78,6 +84,7 @@ export function useRefinement(
       setBoxesImageId(null)
       setSelectedId(null)
       setAnnotationsSaved(false)
+      setHasUnsavedEdits(false)
       setRestoredSourceJobId(null)
       return
     }
@@ -89,6 +96,7 @@ export function useRefinement(
     setBoxesImageId(imageId)
     setSelectedId(null)
     setAnnotationsSaved(false)
+    setHasUnsavedEdits(false)
     setRestoredSourceJobId(null)
 
     async function load() {
@@ -132,6 +140,7 @@ export function useRefinement(
 
   const toggleBox = useCallback((id: string) => {
     setAnnotationsSaved(false)
+    setHasUnsavedEdits(true)
     setBoxes((prev) =>
       prev.map((b) =>
         b.id === id
@@ -145,6 +154,7 @@ export function useRefinement(
     setBoxes((prev) => prev.filter((b) => b.id !== id))
     setSelectedId((prev) => (prev === id ? null : prev))
     setAnnotationsSaved(false)
+    setHasUnsavedEdits(true)
   }, [])
 
   const selectBox = useCallback((id: string | null) => {
@@ -154,11 +164,13 @@ export function useRefinement(
   const loadBoxes = useCallback((incoming: AnnotatedBox[]) => {
     setBoxes(incoming)
     setAnnotationsSaved(false)
+    setHasUnsavedEdits(true)
   }, [])
 
   const updateBox = useCallback((id: string, coords: DrawingBox) => {
     setBoxes(prev => prev.map(box => box.id === id ? { ...box, ...coords } : box))
     setAnnotationsSaved(false)
+    setHasUnsavedEdits(true)
   }, [])
 
   const startDraw = useCallback((x: number, y: number) => {
@@ -188,6 +200,7 @@ export function useRefinement(
     }
     setBoxes((prev) => [...prev, newBox])
     setAnnotationsSaved(false)
+    setHasUnsavedEdits(true)
   }, [drawStart])
 
   const saveAnnotations = useCallback(async (
@@ -207,6 +220,7 @@ export function useRefinement(
       }
       await saveAnnotationsApi(imageId, payload)
       setAnnotationsSaved(true)
+      setHasUnsavedEdits(false)
     } finally {
       setIsSaving(false)
     }
@@ -225,6 +239,7 @@ export function useRefinement(
       setBoxes(merged.boxes)
       setSelectedId(null)
       setAnnotationsSaved(false)
+      setHasUnsavedEdits(true)
       // Saving now records the merged-in job as the source of the model boxes.
       setRestoredSourceJobId(merged.source_job_id)
       return merged.summary
@@ -254,6 +269,7 @@ export function useRefinement(
     saveAnnotations,
     isSaving,
     annotationsSaved: current && annotationsSaved,
+    hasUnsavedEdits: current && hasUnsavedEdits,
     restoredSourceJobId: current ? restoredSourceJobId : null,
     canMergeDetections,
     mergeDetections,

@@ -140,6 +140,11 @@ export default function WorkspacePage() {
   const submitContours = useCallback(async (sourceContourJobId?: string) => {
     if (!image) { setContourError('Najprije učitajte fotografiju.'); return }
     if (contourSubmitLock.current || contourBusy) return
+    if (refinement.hasUnsavedEdits) {
+      // Measuring uses the saved annotation file or the detection job, never unsaved edits (e.g. a merge).
+      setContourError('Spremite izmjene pravokutnika (Save) prije mjerenja; inače se ne bi mjerili prikazani pravokutnici.')
+      return
+    }
     const imageId = image.image_id
     contourSubmitLock.current = true
     setContourSubmitting(true)
@@ -165,7 +170,7 @@ export default function WorkspacePage() {
       contourSubmitLock.current = false
       setContourSubmitting(false)
     }
-  }, [image, contourBusy, contourCalibration, detectionJobId, detectionDone, workspaceStore.setContourJobId, availableContourSource, refinement.annotationsSaved, measureJob?.id, measureJob?.result])
+  }, [image, contourBusy, contourCalibration, detectionJobId, detectionDone, workspaceStore.setContourJobId, availableContourSource, refinement.annotationsSaved, refinement.hasUnsavedEdits, measureJob?.id, measureJob?.result])
 
   useEffect(() => {
     let cancelled = false
@@ -570,13 +575,18 @@ export default function WorkspacePage() {
     }
   }
 
+  const UNSAVED_PREFIX = 'Spremite izmjene pravokutnika'
+  useEffect(() => {
+    if (!refinement.hasUnsavedEdits) setContourError(prev => prev?.startsWith(UNSAVED_PREFIX) ? null : prev)
+  }, [refinement.hasUnsavedEdits])
+
   const [mergeMessage, setMergeMessage] = useState<string | null>(null)
   useEffect(() => { setMergeMessage(null) }, [image?.image_id, detectionJobId])
   const handleMergeDetections = async () => {
     const summary = await refinement.mergeDetections()
     if (!summary) return
     const kept = summary.added_kept + summary.rejected_kept + summary.previous_accepted_kept
-    setMergeMessage(`${summary.new_kept} boxes from the new run; ${kept} kept from your review. Check and Save.`)
+    setMergeMessage(`${summary.new_kept} boxes from the new run; ${kept} kept from your review. Check and Save (measuring waits for Save).`)
     setRefineMode(true)
     setOverlayMode('boxes')
   }
@@ -1037,6 +1047,11 @@ export default function WorkspacePage() {
                   ) : (
                     <>
                       {/* Entry state */}
+                      {refinement.hasUnsavedEdits && (
+                        <div className="text-[10px] text-amber-700 px-2 py-1" title="Measuring uses saved boxes only">
+                          Unsaved box edits: Save before measuring
+                        </div>
+                      )}
                       {refinement.annotationsSaved && (
                         <div className="flex items-center gap-1 text-[10px] text-green-700 px-2 py-1">
                           <CheckCircle2 size={10} />

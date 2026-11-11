@@ -54,6 +54,31 @@ def test_fragment_inside_a_larger_box_is_dropped_but_neighbours_are_kept():
     assert infer_module.suppress_contained([animal, fragment], None) == [animal, fragment]
 
 
+def test_keep_confident_spares_animals_inside_a_box_spanning_two_touching_animals():
+    pair = box(100, 100, 220, 160, .6)              # one box over two touching animals
+    left = box(100, 100, 160, 160, .9)              # each animal's own box scores higher
+    right = box(158, 100, 220, 160, .85)
+    fragment = box(105, 105, 150, 150, .5)          # a body part of the left animal scores lower
+    kept = infer_module.suppress_contained([pair, left, right, fragment], 0.8, keep_confident=True)
+    assert kept == [pair, left, right]
+    assert infer_module.suppress_contained([pair, left, right, fragment], 0.8) == [pair]
+
+
+def test_cli_profiles_match_the_backend_standard_profile(monkeypatch):
+    calls = []
+    monkeypatch.setattr(infer_module, "infer_tiled", lambda **kwargs: calls.append(kwargs) or [])
+    infer_module.main(["--image", "x.jpg", "--profile", "standard"])
+    infer_module.main(["--image", "x.jpg", "--profile", "standard", "--conf", ".3", "--no-contain"])
+    infer_module.main(["--image", "x.jpg"])
+    standard = detection_profile({})
+    assert {k: calls[0][v] for k, v in (("model_path", "model_path"), ("conf", "conf_threshold"), ("iou", "iou_threshold"),
+            ("tile_size", "tile_size"), ("overlap", "overlap"), ("extra_tile_sizes", "extra_tile_sizes"),
+            ("extra_conf", "extra_conf_thresholds"), ("contain", "contain_threshold"),
+            ("contain_keep_confident", "contain_keep_confident"))} == {**standard, "model_path": str(settings.default_model)}
+    assert calls[1]["conf_threshold"] == .3 and calls[1]["contain_threshold"] is None
+    assert calls[2]["conf_threshold"] == .6 and calls[2]["contain_threshold"] is None and not calls[2]["contain_keep_confident"]
+
+
 class FakeBoxes:
     def __init__(self, rows):
         rows = np.array(rows, dtype=np.float32).reshape(-1, 5)
@@ -135,7 +160,8 @@ def test_standard_profile_comes_from_settings_and_requests_can_override():
     assert profile == {"model_path": str(settings.default_model), "conf": settings.default_conf,
                        "iou": settings.default_iou, "tile_size": settings.default_tile_size,
                        "overlap": settings.default_overlap, "extra_tile_sizes": list(settings.default_extra_tile_sizes),
-                       "extra_conf": list(settings.default_extra_conf), "contain": settings.default_contain}
+                       "extra_conf": list(settings.default_extra_conf), "contain": settings.default_contain,
+                       "contain_keep_confident": settings.default_contain_keep_confident}
     custom = detection_profile({"conf": .3, "extra_tile_sizes": [], "extra_conf": [], "contain": None})
     assert custom["conf"] == .3 and custom["extra_tile_sizes"] == [] and custom["contain"] is None
 
@@ -156,6 +182,14 @@ def test_run_detection_uses_and_records_the_standard_profile(monkeypatch, tmp_pa
     assert calls[0]["extra_tile_sizes"] == expected["extra_tile_sizes"]
     assert calls[0]["extra_conf_thresholds"] == expected["extra_conf"]
     assert calls[0]["contain_threshold"] == expected["contain"]
+
+
+def test_profiles_recorded_before_keep_confident_existed_compare_as_off():
+    recorded = {k: v for k, v in detection_profile({"contain_keep_confident": False}).items() if k != "contain_keep_confident"}
+    job = Job(id="v2", type=JobType.DETECTION, params={}, status=JobStatus.COMPLETED, result={"detector_profile": recorded})
+    assert recorded_profile(job)["contain_keep_confident"] is False
+    assert same_profile(recorded, detection_profile({"contain_keep_confident": False}))
+    assert not same_profile(recorded, detection_profile({"contain_keep_confident": True}))
 
 
 def test_jobs_without_a_recorded_profile_are_legacy_detections():

@@ -70,6 +70,7 @@ export interface MergeSummary {
   new_kept: number
   new_dropped_on_rejected: number
   new_dropped_on_added: number
+  new_dropped_inside_previous: number
   previous_accepted: number
   previous_accepted_kept: number
   added_kept: number

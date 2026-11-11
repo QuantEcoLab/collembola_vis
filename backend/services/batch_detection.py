@@ -70,6 +70,7 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
                 extra_tile_sizes=profile["extra_tile_sizes"],
                 extra_conf_thresholds=profile["extra_conf"],
                 contain_threshold=profile["contain"],
+                contain_keep_confident=profile["contain_keep_confident"],
             )
 
             image_stem = image_path.stem

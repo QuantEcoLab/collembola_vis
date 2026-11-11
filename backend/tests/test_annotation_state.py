@@ -105,8 +105,24 @@ def test_merge_keeps_reviewer_decisions_and_replaces_model_boxes():
     assert by_id["prev-box-2"]["status"] == "rejected" and by_id["added-x"]["status"] == "added"
     assert "prev-box-3" not in by_id and "prev-box-0" not in by_id
     assert summary == {"human_saved": True, "new_detections": 5, "new_kept": 3, "new_dropped_on_rejected": 1,
-                       "new_dropped_on_added": 1, "previous_accepted": 3, "previous_accepted_kept": 1,
-                       "added_kept": 1, "rejected_kept": 1}
+                       "new_dropped_on_added": 1, "new_dropped_inside_previous": 0, "previous_accepted": 3,
+                       "previous_accepted_kept": 1, "added_kept": 1, "rejected_kept": 1}
+
+
+def test_merge_a_partial_new_box_does_not_displace_a_reviewed_box():
+    """A smaller new box lying inside a reviewed accepted box (a body part) is dropped; the reviewed box stays."""
+    full = {"id": "box-5", "x1": 0., "y1": 10., "x2": 100., "y2": 50., "conf": .9, "status": "accepted"}
+    reviewed = annotation([full])
+    partial = {"id": "box-0", "x1": 70., "y1": 15., "x2": 100., "y2": 45., "conf": .95, "status": "accepted"}
+    elsewhere = box("box-1", 300)
+    boxes, summary = merge_detections(reviewed, [partial, elsewhere])
+    by_id = {b["id"]: b for b in boxes}
+    assert set(by_id) == {"prev-box-5", "box-1"} and by_id["prev-box-5"]["x2"] == 100.
+    assert summary["new_dropped_inside_previous"] == 1 and summary["previous_accepted_kept"] == 1
+    # a new box that contains the reviewed box (or matches it) still replaces it
+    bigger = {"id": "box-2", "x1": 0., "y1": 5., "x2": 110., "y2": 55., "conf": .9, "status": "accepted"}
+    boxes, summary = merge_detections(reviewed, [bigger])
+    assert [b["id"] for b in boxes] == ["box-2"] and summary["previous_accepted_kept"] == 0
 
 
 def test_merge_into_an_unreviewed_file_takes_only_the_new_boxes():

@@ -12,13 +12,14 @@ const annotation = (imageId: string, boxes: AnnotatedBox[]) => ({
 
 type Hook = ReturnType<typeof useRefinement>
 type Render = { imageId: string | null; ids: string[]; saved: boolean; source: string | null; error: string | null; loading: boolean;
-  canMerge: boolean; merge: Hook['mergeDetections'] }
+  canMerge: boolean; merge: Hook['mergeDetections']; unsaved: boolean; save: Hook['saveAnnotations']; toggle: Hook['toggleBox'] }
 
 function Probe({ imageId, jobId, done, log }: { imageId: string | null; jobId: string | null; done: boolean; log: Render[] }) {
   const refinement = useRefinement(imageId, jobId, done)
   log.push({ imageId, ids: refinement.boxes.map(b => b.id), saved: refinement.annotationsSaved,
     source: refinement.restoredSourceJobId, error: refinement.error, loading: refinement.isLoading,
-    canMerge: refinement.canMergeDetections, merge: refinement.mergeDetections })
+    canMerge: refinement.canMergeDetections, merge: refinement.mergeDetections, unsaved: refinement.hasUnsavedEdits,
+    save: refinement.saveAnnotations, toggle: refinement.toggleBox })
   return null
 }
 
@@ -109,7 +110,7 @@ describe('a newer detection run is not hidden by annotation files nobody reviewe
     const merged = [box('box-0', 102), box('box-7', 900), { ...box('prev-box-1', 300), status: 'rejected' as const },
       { ...box('added-1', 500), status: 'added' as const }]
     vi.mocked(api.mergeDetections).mockResolvedValue({ image_id: 'P', source_job_id: 'new-job', previous_source_job_id: 'legacy-job',
-      boxes: merged, summary: { human_saved: true, new_detections: 3, new_kept: 2, new_dropped_on_rejected: 1, new_dropped_on_added: 0,
+      boxes: merged, summary: { human_saved: true, new_detections: 3, new_kept: 2, new_dropped_on_rejected: 1, new_dropped_on_added: 0, new_dropped_inside_previous: 0,
         previous_accepted: 1, previous_accepted_kept: 0, added_kept: 1, rejected_kept: 1 } })
     const log: Render[] = []
     render(<Probe imageId="P" jobId="new-job" done log={log} />)
@@ -122,6 +123,22 @@ describe('a newer detection run is not hidden by annotation files nobody reviewe
     expect(api.mergeDetections).toHaveBeenCalledWith('P', 'new-job')
     expect(summary).toMatchObject({ new_kept: 2, rejected_kept: 1 })
     expect(log.at(-1)).toMatchObject({ ids: ['box-0', 'box-7', 'prev-box-1', 'added-1'], saved: false, source: 'new-job', canMerge: false })
+    // The merge is a preview: measuring must wait until it is saved.
+    expect(log.at(-1)?.unsaved).toBe(true)
+    vi.mocked(api.saveAnnotations).mockResolvedValue(undefined as never)
+    await act(async () => { await log.at(-1)!.save('P', 'P.jpg', 'new-job') })
+    expect(log.at(-1)).toMatchObject({ saved: true, unsaved: false })
+  })
+
+  it('marks box edits as unsaved until they are saved; a loaded file or job is not an edit', async () => {
+    vi.mocked(api.getAnnotations).mockImplementation(notFound)
+    vi.mocked(api.getDetectionBoxes).mockResolvedValue({ image_id: 'Q', boxes: [box('box-0', 100)] })
+    const log: Render[] = []
+    render(<Probe imageId="Q" jobId="det-Q" done log={log} />)
+    await waitFor(() => expect(log.at(-1)?.ids).toEqual(['box-0']))
+    expect(log.at(-1)?.unsaved).toBe(false)
+    act(() => { log.at(-1)!.toggle('box-0') })
+    expect(log.at(-1)?.unsaved).toBe(true)
   })
 
   it('offers no merge while the detection job is still running', async () => {

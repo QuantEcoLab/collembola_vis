@@ -26,6 +26,7 @@ class DetectionRequest(BaseModel):
     extra_tile_sizes: list[int] | None = None
     extra_conf: list[float] | None = None
     contain: float | None = None
+    contain_keep_confident: bool | None = None
     device: str | None = None
 
 
@@ -56,6 +57,8 @@ async def run_detection(req: DetectionRequest):
         raise HTTPException(422, "extra_tile_sizes and extra_conf must be given together, one confidence per tile size")
     if req.contain is not None:
         params["contain"] = req.contain
+    if req.contain_keep_confident is not None:
+        params["contain_keep_confident"] = req.contain_keep_confident
     if req.device is not None:
         params["device"] = req.device
 

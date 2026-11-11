@@ -96,6 +96,17 @@ def _covers(new: dict, old: dict) -> bool:
     return _iou(new, old) >= MATCH_IOU or _inside(old, new) >= CONTAIN or _inside(new, old) >= CONTAIN
 
 
+def _replaces(new: dict, old: dict) -> bool:
+    """A new box takes the place of a previously accepted box when it matches it or contains it.
+    A smaller new box lying inside it (a partial box) does not displace the reviewed box."""
+    return _iou(new, old) >= MATCH_IOU or _inside(old, new) >= CONTAIN
+
+
+def _partial_of(new: dict, old: dict) -> bool:
+    """A new box that is only part of a previously accepted (reviewed) box."""
+    return _inside(new, old) >= CONTAIN and not _replaces(new, old)
+
+
 def merge_detections(annotation: dict | None, detections: list[dict]) -> tuple[list[dict], dict]:
     """Replace the model boxes of ``annotation`` with ``detections``, keeping the reviewer's decisions.
 
@@ -107,12 +118,14 @@ def merge_detections(annotation: dict | None, detections: list[dict]) -> tuple[l
     rejected = [b for b in old if b.get("status") == "rejected"]
     accepted = [b for b in old if b.get("status") == "accepted"] if human else []
 
-    new, dropped_rejected, dropped_added = [], 0, 0
+    new, dropped_rejected, dropped_added, dropped_partial = [], 0, 0, 0
     for box in detections:
         if any(_iou(box, r) >= MATCH_IOU for r in rejected):
             dropped_rejected += 1
         elif any(_covers(box, a) for a in added):
             dropped_added += 1
+        elif any(_partial_of(box, a) for a in accepted):
+            dropped_partial += 1  # the reviewed box of that animal stays
         else:
             new.append({**box, "status": "accepted"})
 
@@ -122,7 +135,8 @@ def merge_detections(annotation: dict | None, detections: list[dict]) -> tuple[l
             box["id"] = f"prev-{box.get('id', '')}"
         return box
 
-    kept_accepted = [carried(b) for b in accepted if not any(_covers(n, b) for n in new + added)]
+    kept_accepted = [carried(b) for b in accepted
+                     if not any(_replaces(n, b) for n in new) and not any(_covers(a, b) for a in added)]
     boxes = new + [carried(b) for b in rejected] + added + kept_accepted
     summary = {
         "human_saved": human,
@@ -130,6 +144,7 @@ def merge_detections(annotation: dict | None, detections: list[dict]) -> tuple[l
         "new_kept": len(new),
         "new_dropped_on_rejected": dropped_rejected,
         "new_dropped_on_added": dropped_added,
+        "new_dropped_inside_previous": dropped_partial,
         "previous_accepted": len([b for b in old if b.get("status") == "accepted"]),
         "previous_accepted_kept": len(kept_accepted),
         "added_kept": len(added),

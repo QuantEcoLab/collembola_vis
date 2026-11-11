@@ -255,7 +255,7 @@ def run_contours(job: Job, progress_callback):
     import numpy as np
     from PIL import Image
     from ultralytics import YOLO
-    from backend.services.detection import run_detection
+    from backend.services.detection import detection_profile, run_detection
     from scripts.infer_tiled import ultralytics_device
 
     legacy = _legacy_pipeline()
@@ -264,11 +264,9 @@ def run_contours(job: Job, progress_callback):
     detector_job = job_manager.get(job.params.get("detection_job_id", "")) if job.params.get("detection_job_id") else None
     if detector_job is None and not job.params.get("detections_csv"):
         detector_id = uuid.uuid4().hex[:12]
-        # exp03 keeps the detector it was validated with (legacy model, 1280 tiles, no extra pass).
-        params = {"image_path": job.params["image_path"], "model_path": str(settings.legacy_model),
-                  "conf": legacy.PARAMS["detector_conf"], "iou": legacy.PARAMS["bbox_nms_iou"],
-                  "tile_size": legacy.PARAMS["tile_size"], "overlap": legacy.PARAMS["overlap"], "device": legacy.PARAMS["device"],
-                  "extra_tile_sizes": [], "extra_conf": [], "contain": None}
+        # A photo without a detection job gets the standard detector, as "Run detection" would give it
+        # (the legacy detector misses many animals on the Pendifin plates). It runs on exp03's device.
+        params = {"image_path": job.params["image_path"], **detection_profile({}), "device": legacy.PARAMS["device"]}
         detected = run_detection(Job(id=detector_id, type=JobType.DETECTION, params=params),
                                  lambda p, m: progress_callback(p * .35, m))
         detector_job = job_manager.register_completed(JobType.DETECTION, params, detected, job_id=detector_id)

@@ -180,9 +180,10 @@ def test_cpu_contour_detector_run_keeps_cuda_and_json_params(cuda, monkeypatch):
     assert gpu_detection(cuda)["num_detections"] == 0
     assert [device.type for device in FakeUltralyticsModel.instances[0].devices] == ["cpu"]
     assert registered[0]["device"] == "cpu"  # persisted job params stay JSON strings
-    # exp03's own detector run keeps the legacy detector it was validated with
-    assert registered[0]["model_path"] == str(settings.legacy_model)
-    assert registered[0]["extra_tile_sizes"] == [] and registered[0]["contain"] is None
+    # exp03's own detector run uses the standard detection profile (photos without a detection job)
+    assert registered[0]["model_path"] == str(settings.default_model)
+    assert registered[0]["conf"] == settings.default_conf and registered[0]["contain"] == settings.default_contain
+    assert registered[0]["contain_keep_confident"] is settings.default_contain_keep_confident
     assert cuda.runtime.cached_count == PHYSICAL_GPUS
 
 

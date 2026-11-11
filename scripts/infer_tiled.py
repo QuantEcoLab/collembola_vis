@@ -9,6 +9,7 @@ This script:
 4. Outputs full-image detections in CSV and overlay visualization
 
 Usage:
+    python scripts/infer_tiled.py --image path/to/image.jpg --profile standard   # same detector as the web app
     python scripts/infer_tiled.py --image path/to/image.jpg --model runs/detect/train_tiled_1280_20251210_115016/weights/best.pt
 """
 
@@ -21,6 +22,16 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 from ultralytics import YOLO
 import torch
+
+
+# Detector profiles for the command line (--profile). The web backend's defaults (backend/config.py) are
+# the "standard" profile; backend/tests/test_detection_profile.py keeps the two in sync.
+PROFILES = {
+    "standard": {"model": "models/yolo11n_tiled_pendifin_v2.pt", "tile_size": 1280, "overlap": 256, "conf": 0.55,
+                 "iou": 0.5, "extra_tile_sizes": [], "extra_conf": [], "contain": 0.8, "contain_keep_confident": True},
+    "legacy": {"model": "models/yolo11n_tiled_best.pt", "tile_size": 1280, "overlap": 256, "conf": 0.6,
+               "iou": 0.5, "extra_tile_sizes": [], "extra_conf": [], "contain": None, "contain_keep_confident": False},
+}
 
 
 def ultralytics_device(device):
@@ -152,16 +163,22 @@ def nms_global(detections, iou_threshold=0.5):
     return [detections[i] for i in keep]
 
 
-def suppress_contained(detections, contain_threshold=0.8):
+def suppress_contained(detections, contain_threshold=0.8, keep_confident=False):
     """Drop fragment boxes: a box is removed when at least ``contain_threshold`` of its
     area lies inside a larger box that is kept (largest boxes are considered first).
 
     Tiled and multi-scale inference often returns a partial box on one animal next to the
     full box (tile borders, body parts); NMS keeps both because their IoU is small.
+
+    With ``keep_confident`` a contained box survives when its confidence is at least that of
+    every kept box containing it. A fragment scores lower than the box of its animal, but when
+    one box spans two touching animals, each animal's own box usually scores higher than the
+    merged box and must not be removed.
     """
     if not detections or contain_threshold is None or contain_threshold >= 1:
         return list(detections)
     boxes = np.array([[d['x1'], d['y1'], d['x2'], d['y2']] for d in detections], dtype=float)
+    confs = np.array([float(d.get('conf', 0.0)) for d in detections], dtype=float)
     areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
     kept = []
     for i in np.argsort(-areas, kind='stable'):
@@ -169,7 +186,8 @@ def suppress_contained(detections, contain_threshold=0.8):
             k = boxes[kept]
             inter = (np.clip(np.minimum(k[:, 2], boxes[i, 2]) - np.maximum(k[:, 0], boxes[i, 0]), 0, None)
                      * np.clip(np.minimum(k[:, 3], boxes[i, 3]) - np.maximum(k[:, 1], boxes[i, 1]), 0, None))
-            if areas[i] > 0 and (inter / areas[i]).max() >= contain_threshold:
+            inside = (inter / areas[i]) >= contain_threshold if areas[i] > 0 else np.zeros(len(kept), bool)
+            if inside.any() and not (keep_confident and confs[i] >= confs[np.array(kept)[inside]].max()):
                 continue
         kept.append(i)
     return [detections[i] for i in sorted(kept)]
@@ -213,6 +231,7 @@ def infer_tiled(
     extra_tile_sizes=None,
     extra_conf_thresholds=None,
     contain_threshold=None,
+    contain_keep_confident=False,
 ):
     """
     Run tiled inference on a large image.
@@ -232,6 +251,8 @@ def infer_tiled(
         extra_conf_thresholds: Confidence threshold for each extra tile size
         contain_threshold: If set, drop boxes that lie at least this fraction inside a larger box
             (fragment duplicates), applied after the global NMS
+        contain_keep_confident: Keep a contained box whose confidence is at least that of every box
+            containing it (an animal inside a box that spans two touching animals)
 
     Returns:
         detections: List of detection dictionaries
@@ -300,8 +321,9 @@ def infer_tiled(
     n_after_nms = len(final_detections)
     print(f"Final detections after NMS: {n_after_nms}")
     if contain_threshold is not None:
-        final_detections = suppress_contained(final_detections, contain_threshold)
-        print(f"After fragment suppression (contain >= {contain_threshold}): {len(final_detections)}")
+        final_detections = suppress_contained(final_detections, contain_threshold, contain_keep_confident)
+        print(f"After fragment suppression (contain >= {contain_threshold}, keep_confident={contain_keep_confident}): "
+              f"{len(final_detections)}")
 
     # Save to CSV
     csv_path = output_dir / f"{image_name}_detections.csv"
@@ -359,6 +381,7 @@ def infer_tiled(
         'extra_tile_sizes': [t for t, _ in passes[1:]],
         'extra_conf_thresholds': [c for _, c in passes[1:]],
         'contain_threshold': contain_threshold,
+        'contain_keep_confident': bool(contain_keep_confident),
         'num_tiles_all_passes': total_tiles,
         'detections_before_nms': len(all_detections),
         'detections_after_nms': n_after_nms,
@@ -381,45 +404,69 @@ def infer_tiled(
     return final_detections
 
 
-if __name__ == '__main__':
+def main(argv=None):
     parser = argparse.ArgumentParser(description='Tiled inference for large collembola images')
     parser.add_argument('--image', type=str, required=True,
                         help='Path to input image')
-    parser.add_argument('--model', type=str, 
-                        default='runs/detect/train_tiled_1280_20251210_115016/weights/best.pt',
-                        help='Path to YOLO model weights')
-    parser.add_argument('--tile-size', type=int, default=1280,
+    parser.add_argument('--profile', choices=sorted(PROFILES), default=None,
+                        help='Detector profile giving the defaults of every setting below: "standard" is the web '
+                             'app\'s detector (Pendifin fine-tune, fragment suppression), "legacy" the detector used '
+                             'until 2026-11. Explicit flags override it. Without --profile the old CLI defaults apply.')
+    parser.add_argument('--model', type=str, default=None,
+                        help='Path to YOLO model weights (default: the profile\'s model, else '
+                             'runs/detect/train_tiled_1280_20251210_115016/weights/best.pt)')
+    parser.add_argument('--tile-size', type=int, default=None,
                         help='Tile size (default: 1280)')
-    parser.add_argument('--overlap', type=int, default=256,
+    parser.add_argument('--overlap', type=int, default=None,
                         help='Overlap between tiles (default: 256)')
-    parser.add_argument('--conf', type=float, default=0.6,
-                        help='Confidence threshold (default: 0.6)')
-    parser.add_argument('--iou', type=float, default=0.5,
+    parser.add_argument('--conf', type=float, default=None,
+                        help='Confidence threshold (default: the profile\'s, else 0.6)')
+    parser.add_argument('--iou', type=float, default=None,
                         help='IoU threshold for NMS (default: 0.5)')
     parser.add_argument('--output', type=str, default='infer_tiled_output',
                         help='Output directory')
     parser.add_argument('--device', type=str, default='0',
                         help='GPU index among the visible GPUs, or cpu (default: 0). Choose the physical GPU '
                              'with CUDA_VISIBLE_DEVICES, e.g. CUDA_VISIBLE_DEVICES=2 ... --device 0')
-    parser.add_argument('--extra-tile-sizes', type=int, nargs='*', default=[],
+    parser.add_argument('--extra-tile-sizes', type=int, nargs='*', default=None,
                         help='Extra tile sizes run with the same model, e.g. 640 (default: none)')
-    parser.add_argument('--extra-conf', type=float, nargs='*', default=[],
+    parser.add_argument('--extra-conf', type=float, nargs='*', default=None,
                         help='Confidence threshold for each extra tile size')
     parser.add_argument('--contain', type=float, default=None,
-                        help='Drop boxes lying at least this fraction inside a larger box, e.g. 0.8 (default: off)')
+                        help='Drop boxes lying at least this fraction inside a larger box, e.g. 0.8 '
+                             '(default: the profile\'s, else off)')
+    parser.add_argument('--no-contain', action='store_true', help='Turn fragment suppression off')
+    parser.add_argument('--contain-keep-confident', dest='contain_keep_confident', action='store_true', default=None,
+                        help='Keep a contained box whose confidence is at least that of the boxes containing it')
+    parser.add_argument('--no-contain-keep-confident', dest='contain_keep_confident', action='store_false')
 
-    args = parser.parse_args()
-    
-    infer_tiled(
+    args = parser.parse_args(argv)
+    base = dict(PROFILES[args.profile]) if args.profile else {
+        "model": 'runs/detect/train_tiled_1280_20251210_115016/weights/best.pt', "tile_size": 1280, "overlap": 256,
+        "conf": 0.6, "iou": 0.5, "extra_tile_sizes": [], "extra_conf": [], "contain": None,
+        "contain_keep_confident": False}
+    given = {"model": args.model, "tile_size": args.tile_size, "overlap": args.overlap, "conf": args.conf,
+             "iou": args.iou, "extra_tile_sizes": args.extra_tile_sizes, "extra_conf": args.extra_conf,
+             "contain": args.contain, "contain_keep_confident": args.contain_keep_confident}
+    settings = {**base, **{k: v for k, v in given.items() if v is not None}}
+    if args.no_contain:
+        settings["contain"] = None
+
+    return infer_tiled(
         image_path=args.image,
-        model_path=args.model,
-        tile_size=args.tile_size,
-        overlap=args.overlap,
-        conf_threshold=args.conf,
-        iou_threshold=args.iou,
+        model_path=settings["model"],
+        tile_size=settings["tile_size"],
+        overlap=settings["overlap"],
+        conf_threshold=settings["conf"],
+        iou_threshold=settings["iou"],
         output_dir=args.output,
         device=args.device,
-        extra_tile_sizes=args.extra_tile_sizes,
-        extra_conf_thresholds=args.extra_conf,
-        contain_threshold=args.contain,
+        extra_tile_sizes=settings["extra_tile_sizes"],
+        extra_conf_thresholds=settings["extra_conf"],
+        contain_threshold=settings["contain"],
+        contain_keep_confident=settings["contain_keep_confident"],
     )
+
+
+if __name__ == '__main__':
+    main()
