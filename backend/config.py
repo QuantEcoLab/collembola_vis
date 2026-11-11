@@ -18,14 +18,15 @@ class Settings(BaseSettings):
     detector_split_registry: Path = Path("data/detector_split_registry.json")
 
     # Standard detection profile. The detector is the production model fine-tuned on reviewed and
-    # visually verified Pendifin (CAC/ERD) train plates; it runs on 1280 tiles, followed by global NMS
-    # and suppression of fragment boxes lying >= default_contain inside a larger box. Optional extra
-    # tile passes (e.g. 640 px tiles seen 2x upscaled) are supported but off by default. The weights
-    # are not in git: copy them to default_model before deploying (see docs/DETECTION_RECALL.md).
-    default_model: Path = Path("models/yolo11n_tiled_pendifin_v1.pt")
+    # visually verified Pendifin (CAC/ERD) train plates with hard negatives (v2); it runs on 1280 tiles,
+    # followed by global NMS and suppression of fragment boxes lying >= default_contain inside a larger
+    # box. Optional extra tile passes (e.g. 640 px tiles seen 2x upscaled) are supported but off by
+    # default. The weights are not in git: install them at default_model before deploying; startup
+    # refuses a missing file or another hash (see docs/DETECTION_RECALL.md).
+    default_model: Path = Path("models/yolo11n_tiled_pendifin_v2.pt")
     # Checked at startup (backend.services.detection.validate_detector); empty disables the hash check.
-    default_model_sha256: str = "ac3d0b995a57be3109b31e5958e042c6b368c75b2ab6d45407ce021568b5b649"
-    default_conf: float = 0.4
+    default_model_sha256: str = "6c1d003cbcd03988c01b46af917e2273b3282f445e710632e72dfad7c221f276"
+    default_conf: float = 0.55
     default_iou: float = 0.5
     default_tile_size: int = 1280
     default_overlap: int = 256
@@ -35,7 +36,7 @@ class Settings(BaseSettings):
 
     # Legacy detector (until 2026-11): conf 0.6, 1280 tiles only, no fragment suppression. Detection
     # jobs created before the profile was recorded used it, and the exp03 contour pipeline keeps it
-    # for its own detector run.
+    # for its own detector run (measurement of photos that have no detection job).
     legacy_model: Path = Path("models/yolo11n_tiled_best.pt")
 
     # Experimental contour workflow; production detector/model defaults above stay intact.
