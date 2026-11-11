@@ -232,6 +232,7 @@ def test_app_startup_pins_cuda_before_any_job_handler_is_registered(monkeypatch)
 
     calls = []
     monkeypatch.setattr(main, "validate_checkpoint", lambda: calls.append("checkpoint"))
+    monkeypatch.setattr(main, "validate_detector", lambda: calls.append("detector"))
     monkeypatch.setattr(main, "pin_cuda_runtime", lambda: calls.append("pin"))
     monkeypatch.setattr(main.db, "init_db", lambda: None)
     monkeypatch.setattr(main.db_projects, "init_project_db", lambda: None)
@@ -242,5 +243,5 @@ def test_app_startup_pins_cuda_before_any_job_handler_is_registered(monkeypatch)
             pass
 
     asyncio.run(startup())
-    assert calls[:2] == ["checkpoint", "pin"]
-    assert JobType.DETECTION in calls[2:]
+    assert calls[:3] == ["checkpoint", "detector", "pin"]
+    assert JobType.DETECTION in calls[3:]

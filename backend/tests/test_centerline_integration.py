@@ -51,7 +51,7 @@ def test_unreliable_candidates_keep_diagnostics_but_never_enter_any_volume_stati
 
 @pytest.mark.parametrize("old_method", ["fast", "sam"])
 def test_legacy_api_method_names_cannot_select_old_measurement_algorithms(isolated, monkeypatch, old_method):
-    monkeypatch.setattr(contours, "find_saved_source", lambda image_id: None)
+    monkeypatch.setattr(contours, "find_saved_source", lambda image_id, **filters: None)
     dispatch = Mock(return_value={"measurement_method": METHOD})
     monkeypatch.setattr(contours, "run_contours", dispatch)
     job = Job(id="compat", type=JobType.MEASUREMENT, params={"image_id": "photo", "image_path": "photo.png", "method": old_method, "um_per_pixel": 8.})
@@ -62,7 +62,8 @@ def test_legacy_api_method_names_cannot_select_old_measurement_algorithms(isolat
 
 def test_batch_uses_same_method_and_never_overwrites_saved_human_annotations(isolated, monkeypatch):
     ann = settings.annotations_dir / "photo.json"
-    original = b'{"manual":"precious edits"}'
+    original = json.dumps({"image_id": "photo", "image_filename": "photo.png", "source_job_id": "det", "saved_at": "2026-11-11T13:00:00+00:00",
+                           "boxes": [{"id": "added-1", "x1": 1, "y1": 1, "x2": 9, "y2": 9, "conf": 1, "status": "added"}]}).encode()
     ann.write_bytes(original)
     run = Mock(return_value={"measurement_method": METHOD, "num_organisms": 2, "volume_summary": {"count": 1, "excluded_count": 1}})
     monkeypatch.setattr(batch_measurement, "run_measurement", run)

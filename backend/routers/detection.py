@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -10,6 +9,7 @@ from backend.auth import get_current_user
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobStatus, JobType
+from backend.services.annotation_state import detection_job_boxes, detection_job_image_id
 from backend.services.image import get_image_info
 from backend.services.image_identity import capture_identity
 
@@ -80,27 +80,12 @@ async def get_detection_boxes(job_id: str):
         raise HTTPException(404, "Job not found")
     if job.status != JobStatus.COMPLETED:
         raise HTTPException(400, "Job not completed yet")
-    csv_path = job.result.get("csv_path")
-    if not csv_path:
+    if not job.result.get("csv_path"):
         raise HTTPException(404, "No CSV result for this job")
     try:
-        df = pd.read_csv(csv_path)
+        boxes = detection_job_boxes(job)
     except FileNotFoundError:
         raise HTTPException(404, "Detections CSV not found on disk")
-    boxes = []
-    for i, row in df.iterrows():
-        boxes.append({
-            "id": f"box-{i}",
-            "x1": float(row["x1"]),
-            "y1": float(row["y1"]),
-            "x2": float(row["x2"]),
-            "y2": float(row["y2"]),
-            "conf": float(row.get("confidence", row.get("conf", 1.0))),
-            "status": "accepted",
-        })
     # Lets the workspace refuse boxes of a job that belongs to another photo.
-    result = job.result
-    image_id = result.get("image_id") or (result.get("image_identity") or {}).get("image_id") or job.params.get("image_id")
-    if not image_id and result.get("image_path"):
-        image_id = Path(result["image_path"]).parent.name  # data/uploads/<image_id>/<file>
+    image_id = detection_job_image_id(job)
     return {"image_id": image_id, "boxes": boxes}

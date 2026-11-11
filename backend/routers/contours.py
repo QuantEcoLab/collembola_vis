@@ -13,7 +13,8 @@ from backend.auth import get_current_user
 from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobStatus, JobType
-from backend.services.contours import MODEL_NAME, EXP03_SHA256, validate_checkpoint, annotation_snapshot, find_saved_source
+from backend.services.contours import (MODEL_NAME, EXP03_SHA256, validate_checkpoint, annotation_snapshot, find_saved_source,
+                                       source_matches)
 from backend.services.detection import detection_profile, legacy_profile, recorded_profile, same_profile
 from backend.services.centerline_measurement import METHOD
 from backend.services.image import get_image_info
@@ -50,8 +51,11 @@ async def contour_model():
 @router.get("/source/{image_id}")
 def saved_source(image_id: str):
     source = find_saved_source(image_id)
+    result = source["result"] if source else {}
     return {"job_id": source["id"] if source else None,
-            "measurement_method": source["result"].get("measurement_method") if source else None}
+            "measurement_method": result.get("measurement_method"),
+            "detection_job_id": result.get("detection_job_id"),
+            "annotations_sha256": (result.get("pipeline") or {}).get("annotations_sha256")}
 
 
 @router.get("/overview/{job_id}")
@@ -79,8 +83,12 @@ async def run_contours(req: ContourRequest):
         validate_checkpoint()
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
-    if req.detection_job_id and req.source_contour_job_id:
-        raise HTTPException(400, "Odaberite postojeće detekcije ili ponovno mjerenje maski, ne oboje.")
+    if req.detection_job_id and req.source_contour_job_id and not req.use_annotations:
+        # Saved masks are reused only if they were made from exactly these detections; after a new
+        # detection run the photo is segmented again instead of measuring stale masks.
+        previous = job_manager.get(req.source_contour_job_id)
+        if previous is None or not source_matches(previous.result or {}, detection_job_id=req.detection_job_id):
+            req.source_contour_job_id = None
     if req.detection_job_id:
         detection = job_manager.get(req.detection_job_id)
         if detection is None or detection.type != JobType.DETECTION or detection.status != JobStatus.COMPLETED:

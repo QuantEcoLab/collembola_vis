@@ -60,6 +60,28 @@ export interface AnnotationFile {
   source_job_id: string
   created_at: string
   boxes: AnnotatedBox[]
+  /** Set by every save from the editor; files without it were written from raw detections (no human review). */
+  saved_at?: string | null
+}
+
+export interface MergeSummary {
+  human_saved: boolean
+  new_detections: number
+  new_kept: number
+  new_dropped_on_rejected: number
+  new_dropped_on_added: number
+  previous_accepted: number
+  previous_accepted_kept: number
+  added_kept: number
+  rejected_kept: number
+}
+
+export interface MergedDetections {
+  image_id: string
+  source_job_id: string
+  previous_source_job_id: string | null
+  boxes: AnnotatedBox[]
+  summary: MergeSummary
 }
 
 

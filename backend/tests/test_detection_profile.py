@@ -1,4 +1,5 @@
 """Standard detection profile: fine-tuned detector, extra 640-tile pass and fragment suppression."""
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -167,3 +168,36 @@ def test_jobs_without_a_recorded_profile_are_legacy_detections():
     new = Job(id="new", type=JobType.DETECTION, status=JobStatus.COMPLETED, params={"image_path": "x"},
               result={"detector_profile": detection_profile({})})
     assert same_profile(recorded_profile(new), detection_profile({}))
+
+
+def test_startup_refuses_missing_or_unexpected_detector_weights(tmp_path, monkeypatch):
+    """A deploy that forgets the (untracked) weights fails at startup, not at every detection."""
+    from backend.services.detection import validate_detector
+
+    weights = tmp_path / "detector.pt"
+    monkeypatch.setattr(settings, "default_model", weights)
+    monkeypatch.setattr(settings, "default_model_sha256", hashlib.sha256(b"expected weights").hexdigest())
+    with pytest.raises(RuntimeError, match="missing"):
+        validate_detector()
+    weights.write_bytes(b"other weights")
+    with pytest.raises(RuntimeError, match="expected"):
+        validate_detector()
+    weights.write_bytes(b"expected weights")
+    assert validate_detector() == weights
+
+
+def test_gpu_index_is_resolved_among_the_visible_gpus_without_touching_the_environment(monkeypatch):
+    """--device 0 with CUDA_VISIBLE_DEVICES=2 must stay on physical GPU 2 (ultralytics would rewrite the variable)."""
+    import os
+
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "2,3")
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    assert infer_module.ultralytics_device("0") == torch.device("cuda:0")
+    assert infer_module.ultralytics_device("cuda:1") == torch.device("cuda:1")
+    assert infer_module.ultralytics_device(torch.device("cuda:1")) == torch.device("cuda:1")
+    with pytest.raises(ValueError, match="not available"):
+        infer_module.ultralytics_device("2")
+    assert os.environ["CUDA_VISIBLE_DEVICES"] == "2,3"
+    assert infer_module.ultralytics_device("0,1") == "0,1"  # multi-GPU strings are left to ultralytics
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
+    assert infer_module.ultralytics_device("0") == "0"  # no GPU: ultralytics reports its usual error

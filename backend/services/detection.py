@@ -60,6 +60,30 @@ def same_profile(a: dict, b: dict) -> bool:
     return norm(a) == norm(b)
 
 
+def _repo_path(path: Path) -> Path:
+    return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path
+
+
+def validate_detector() -> Path:
+    """Startup check: the standard detector weights are installed and are the expected build.
+
+    The weights are not in git; a deploy that forgets to copy them would otherwise fail every
+    standard detection (and the fine-tune default) at run time instead of at startup.
+    """
+    import hashlib
+
+    path = _repo_path(settings.default_model)
+    if not path.is_file():
+        raise RuntimeError(
+            f"Standard detector weights are missing: {path}. Install the file named by default_model "
+            f"(sha256 {settings.default_model_sha256}) before starting the service; see docs/DETECTION_RECALL.md.")
+    if settings.default_model_sha256:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != settings.default_model_sha256:
+            raise RuntimeError(f"Standard detector {path} has sha256 {digest}, expected {settings.default_model_sha256}.")
+    return path
+
+
 def run_detection(job: Job, progress_callback) -> dict[str, Any]:
     """Execute tiled inference for a job.
 

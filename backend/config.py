@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # tile passes (e.g. 640 px tiles seen 2x upscaled) are supported but off by default. The weights
     # are not in git: copy them to default_model before deploying (see docs/DETECTION_RECALL.md).
     default_model: Path = Path("models/yolo11n_tiled_pendifin_v1.pt")
+    # Checked at startup (backend.services.detection.validate_detector); empty disables the hash check.
+    default_model_sha256: str = "ac3d0b995a57be3109b31e5958e042c6b368c75b2ab6d45407ce021568b5b649"
     default_conf: float = 0.4
     default_iou: float = 0.5
     default_tile_size: int = 1280

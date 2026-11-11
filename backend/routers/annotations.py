@@ -12,6 +12,10 @@ from pydantic import BaseModel
 
 from backend.auth import get_current_user
 from backend.config import settings
+from backend.jobs.manager import job_manager
+from backend.jobs.models import JobStatus, JobType
+from backend.services.annotation_state import (detection_job_boxes, detection_job_image_id, merge_detections,
+                                               read_annotation)
 
 router = APIRouter(
     prefix="/api/annotations",
@@ -61,6 +65,32 @@ async def save_annotations(image_id: str, data: AnnotationFile):
     payload["saved_at"] = datetime.now(timezone.utc).isoformat()
     path.write_text(json.dumps(payload, indent=2))
     return {"ok": True, "path": str(path)}
+
+
+class MergeRequest(BaseModel):
+    detection_job_id: str
+
+
+@router.post("/{image_id}/merge-detections")
+async def merge_new_detections(image_id: str, req: MergeRequest):
+    """Preview: boxes of a newer detection job merged into the saved annotations of a photo.
+
+    The reviewer's added and rejected boxes are kept; nothing is written until the merged boxes are
+    saved with POST /api/annotations/{image_id}.
+    """
+    job = job_manager.get(req.detection_job_id)
+    if job is None or job.type != JobType.DETECTION or job.status != JobStatus.COMPLETED:
+        raise HTTPException(400, "Posao detekcije nije dovršen.")
+    if detection_job_image_id(job) != image_id:
+        raise HTTPException(400, "Detekcije pripadaju drugoj fotografiji.")
+    try:
+        detections = detection_job_boxes(job)
+    except FileNotFoundError:
+        raise HTTPException(404, "Nedostaje CSV detekcija.")
+    annotation = read_annotation(image_id)
+    boxes, summary = merge_detections(annotation, detections)
+    return {"image_id": image_id, "source_job_id": job.id,
+            "previous_source_job_id": (annotation or {}).get("source_job_id"), "boxes": boxes, "summary": summary}
 
 
 @router.get("/{image_id}/export")

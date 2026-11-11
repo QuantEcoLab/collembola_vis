@@ -77,7 +77,7 @@ export default function WorkspacePage() {
   const [calibrationMessage, setCalibrationMessage] = useState<string | null>(null)
   // ── Detection ───────────────────────────────────────────────────────
   // Initial value of the advanced dialog only; the standard run sends no thresholds so the backend's
-  // detection profile (fine-tuned detector, extra 640-tile pass, fragment suppression) applies.
+  // detection profile (fine-tuned detector on 1280 tiles, fragment suppression) applies.
   const [conf] = useState(STANDARD_CONF)
   const [tileSize] = useState(1280)
   const [overlap] = useState(256)
@@ -146,9 +146,15 @@ export default function WorkspacePage() {
     setContourError(null)
     try {
       const cachedSource = sourceContourJobId ?? availableContourSource ?? (measureJob?.result?.model_name === 'exp03_no_os' && measureJob.result.image_id === imageId && measureJob.result.mask_records_path ? measureJob.id : undefined)
+      const useAnnotations = refinement.annotationsSaved
+      const currentDetections = detectionJobId && detectionDone ? detectionJobId : undefined
       const response = await runContours({ image_id: imageId, um_per_pixel: contourCalibration,
-        ...(refinement.annotationsSaved ? { use_annotations: true } : {}),
-        ...(cachedSource ? { source_contour_job_id: cachedSource } : detectionJobId && detectionDone ? { detection_job_id: detectionJobId } : {}),
+        ...(useAnnotations ? { use_annotations: true } : {}),
+        // Without saved annotations the shown boxes are the current detection job's; the backend reuses
+        // cached masks only if they were made from that job, otherwise it segments the job's boxes.
+        ...(cachedSource && (useAnnotations || !currentDetections)
+          ? { source_contour_job_id: cachedSource }
+          : currentDetections ? { detection_job_id: currentDetections, ...(cachedSource ? { source_contour_job_id: cachedSource } : {}) } : {}),
       })
       if (activeImageRef.current !== imageId) return
       setContourJobIdState(response.job_id)
@@ -562,6 +568,17 @@ export default function WorkspacePage() {
     } catch (e: any) {
       setRefineSaveError(e.message)
     }
+  }
+
+  const [mergeMessage, setMergeMessage] = useState<string | null>(null)
+  useEffect(() => { setMergeMessage(null) }, [image?.image_id, detectionJobId])
+  const handleMergeDetections = async () => {
+    const summary = await refinement.mergeDetections()
+    if (!summary) return
+    const kept = summary.added_kept + summary.rejected_kept + summary.previous_accepted_kept
+    setMergeMessage(`${summary.new_kept} boxes from the new run; ${kept} kept from your review. Check and Save.`)
+    setRefineMode(true)
+    setOverlayMode('boxes')
   }
 
   const handleRunMeasurement = async () => {
@@ -1025,6 +1042,19 @@ export default function WorkspacePage() {
                           <CheckCircle2 size={10} />
                           Annotations saved
                         </div>
+                      )}
+                      {refinement.canMergeDetections && (
+                        <button
+                          onClick={handleMergeDetections}
+                          disabled={refinement.isMerging}
+                          title="Replace the model boxes of the saved annotations with the current detection run. Your added and rejected boxes are kept; review and Save to keep the result."
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium text-blue-700 hover:bg-blue-50 transition-colors disabled:opacity-50"
+                        >
+                          {refinement.isMerging ? 'Merging…' : 'Merge new detections'}
+                        </button>
+                      )}
+                      {mergeMessage && (
+                        <p className="text-[10px] text-blue-700 px-2 max-w-[160px] leading-tight">{mergeMessage}</p>
                       )}
                       <button
                         onClick={() => { setRefineMode(true); setOverlayMode('boxes') }}

@@ -30,8 +30,12 @@ def annotation_snapshot(image_id):
     return data, digest
 
 
-def find_saved_source(image_id):
-    """Find a completed same-image exp03 mask job, including archived calculations."""
+def find_saved_source(image_id, *, detection_job_id=None, annotations_sha256=None):
+    """Find a completed same-image exp03 mask job, including archived calculations.
+
+    With ``annotations_sha256`` only masks made from exactly those saved boxes qualify; with
+    ``detection_job_id`` only masks made from that detection job's raw boxes. Without either, any.
+    """
     candidates = []
     for path in settings.outputs_dir.glob("*/result.json"):
         try:
@@ -39,11 +43,22 @@ def find_saved_source(image_id):
             result = data.get("result") or {}
             if (data.get("status") == "completed" and result.get("image_id") == image_id
                     and result.get("model_name") == MODEL_NAME and result.get("checkpoint_sha256") == EXP03_SHA256
-                    and Path(result.get("mask_records_path", "")).is_file()):
+                    and Path(result.get("mask_records_path", "")).is_file()
+                    and source_matches(result, detection_job_id=detection_job_id, annotations_sha256=annotations_sha256)):
                 candidates.append(data)
         except (OSError, ValueError):
             continue
     return max(candidates, key=lambda d: d.get("completed_at") or d.get("created_at") or "") if candidates else None
+
+
+def source_matches(result, *, detection_job_id=None, annotations_sha256=None):
+    """Whether saved exp03 masks were made from the boxes the caller is about to measure."""
+    made_from_annotations = (result.get("pipeline") or {}).get("annotations_sha256")
+    if annotations_sha256:
+        return made_from_annotations == annotations_sha256
+    if detection_job_id:
+        return not made_from_annotations and result.get("detection_job_id") == detection_job_id
+    return True
 
 
 def file_sha256(path: Path) -> str:
@@ -167,6 +182,35 @@ def _write_measurements(job, records, contours, overlay_path, detection_job_id, 
             "detection_job_id": detection_job_id, "pipeline": pipeline_metadata, "gt_saved": False}
 
 
+def detection_job_for_csv(csv_path, job_manager):
+    """The detection job whose result CSV is ``csv_path`` (outputs/<job_id>/<stem>_detections.csv)."""
+    if not csv_path:
+        return None
+    path = Path(csv_path).resolve()
+    candidate = job_manager.get(path.parent.name)
+    if candidate is None or candidate.type != JobType.DETECTION:
+        return None
+    if Path((candidate.result or {}).get("csv_path", "")).resolve() != path:
+        return None
+    return candidate
+
+
+def _box_provenance_job(job, detector_job, job_manager):
+    """Detection job that produced the measured boxes (for the recorded detector hash/profile).
+
+    Saved annotations: the job named in the snapshot's source_job_id (added boxes are hand-drawn);
+    a detections CSV: the job that wrote it; otherwise the detection job of this run. None if unknown.
+    """
+    snapshot = job.params.get("annotation_snapshot")
+    if snapshot is not None:
+        candidate = job_manager.get(snapshot.get("source_job_id") or "") if snapshot.get("source_job_id") else None
+    elif detector_job is not None:
+        candidate = detector_job
+    else:
+        candidate = detection_job_for_csv(job.params.get("detections_csv"), job_manager)
+    return candidate if candidate is not None and candidate.type == JobType.DETECTION else None
+
+
 def run_contours(job: Job, progress_callback):
     """Fixed detector/segmentation/dedup followed automatically by existing mask measurement."""
     checkpoint = validate_checkpoint()
@@ -241,11 +285,12 @@ def run_contours(job: Job, progress_callback):
     mask_dir = output / "masks"
     mask_dir.mkdir(exist_ok=True)
     from backend.services.detection import recorded_profile
-    if detector_job is not None:
-        detector_path = Path(recorded_profile(detector_job)["model_path"])
-    else:
-        detector_path = settings.default_model
-    detector_hash = file_sha256(detector_path)
+    provenance_job = _box_provenance_job(job, detector_job, job_manager)
+    provenance_profile = recorded_profile(provenance_job) if provenance_job is not None else None
+    detector_path = Path(provenance_profile["model_path"]) if provenance_profile else None
+    if detector_path is not None and not detector_path.is_absolute():
+        detector_path = REPO / detector_path
+    detector_hash = file_sha256(detector_path) if detector_path is not None and detector_path.is_file() else None
     dedup_hash = file_sha256(legacy.DEDUP_MODEL)
     for index, detection in enumerate(detections):
         bbox = tuple(float(detection[key]) for key in ["x1", "y1", "x2", "y2"])
@@ -290,10 +335,12 @@ def run_contours(job: Job, progress_callback):
                 "detections": len(rows), "without_mask": sum(not row["has_mask"] for row in rows),
                 "removed_duplicates": len(rows) - len(kept_ids), "kept_boxes": len(kept_ids),
                 "detector_sha256": detector_hash, "dedup_sha256": dedup_hash,
-                "detector_profile": recorded_profile(detector_job) if detector_job is not None else None}
+                "detector_profile": provenance_profile,
+                "detector_job_id": provenance_job.id if provenance_job is not None else None}
     result = _write_measurements(job, records, contours, overlay_path, detector_job.id if detector_job else None, metadata,
                                  lambda p, m: progress_callback(.9 + .08 * p, m))
-    if file_sha256(checkpoint) != EXP03_SHA256 or file_sha256(detector_path) != detector_hash or file_sha256(legacy.DEDUP_MODEL) != dedup_hash:
+    if (file_sha256(checkpoint) != EXP03_SHA256 or file_sha256(legacy.DEDUP_MODEL) != dedup_hash
+            or (detector_hash is not None and file_sha256(detector_path) != detector_hash)):
         raise RuntimeError("Hash modela ili classifiera promijenjen je tijekom obrade.")
     progress_callback(1., "Konture i mjerenja exp03_no_os su dovršeni.")
     return result

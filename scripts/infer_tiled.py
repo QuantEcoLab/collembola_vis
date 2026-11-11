@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -30,12 +31,30 @@ def ultralytics_device(device):
     from later jobs (torch caches the empty device list), so CPU runs pass a
     ``torch.device``, which ultralytics uses as is. The CPU thread count is set
     exactly as ``select_device("cpu")`` would set it.
+
+    A single GPU index ("1" or "cuda:1") is resolved to ``torch.device("cuda:1")``
+    among the GPUs this process can see. ``select_device("1")`` would instead write
+    ``CUDA_VISIBLE_DEVICES="1"``: run with ``CUDA_VISIBLE_DEVICES=2 ... --device 0``,
+    that silently moves a CLI job to physical GPU 0, and inside the service, whose
+    GPU list is fixed at startup, "1" would land on the first GPU.
     """
-    if isinstance(device, str) and device.strip().lower() == "cpu":
+    if isinstance(device, torch.device):
+        return device
+    text = str(device).strip().lower()
+    if text == "cpu":
         from ultralytics.utils import NUM_THREADS
 
         torch.set_num_threads(NUM_THREADS)
         return torch.device("cpu")
+    index = text[5:] if text.startswith("cuda:") else text
+    if index.isdigit():
+        visible = torch.cuda.device_count()  # first CUDA query fixes the visible GPU list for the process
+        if visible == 0:
+            return device  # no GPU at all: ultralytics reports its usual error
+        if int(index) >= visible:
+            raise ValueError(f"GPU {device!r} is not available: this process sees {visible} GPU(s) "
+                             f"(CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES')!r})")
+        return torch.device(f"cuda:{int(index)}")
     return device
 
 
@@ -380,7 +399,8 @@ if __name__ == '__main__':
     parser.add_argument('--output', type=str, default='infer_tiled_output',
                         help='Output directory')
     parser.add_argument('--device', type=str, default='0',
-                        help='GPU device to use (default: 0)')
+                        help='GPU index among the visible GPUs, or cpu (default: 0). Choose the physical GPU '
+                             'with CUDA_VISIBLE_DEVICES, e.g. CUDA_VISIBLE_DEVICES=2 ... --device 0')
     parser.add_argument('--extra-tile-sizes', type=int, nargs='*', default=[],
                         help='Extra tile sizes run with the same model, e.g. 640 (default: none)')
     parser.add_argument('--extra-conf', type=float, nargs='*', default=[],

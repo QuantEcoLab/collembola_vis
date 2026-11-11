@@ -140,4 +140,19 @@ describe('Workspace contour request and result workflow', () => {
     act(() => useJobStore.getState().updateJob(completed('recalibrated', true)))
     await waitFor(() => expect(screen.getByTestId('volume-summary')).toHaveTextContent('10 µm/px'))
   })
+
+  it('after a new detection run, contours send the current detections so masks of older boxes are not reused', async () => {
+    const detection: Job = { id: 'det-new', type: 'detection', status: 'completed', progress: 1, message: 'Done', error: null,
+      created_at: '', started_at: '', completed_at: '', result: { image_id: photo.image_id, csv_path: '/output/det.csv' } }
+    useWorkspaceStore.setState({ image: photo, detectionJobId: 'det-new' })
+    useJobStore.getState().updateJob(detection)
+    vi.mocked(api.getContourSource).mockResolvedValue({ job_id: 'masks-from-old-boxes', measurement_method: CENTERLINE_METHOD })
+    vi.mocked(api.runContours).mockResolvedValue({ job_id: 'contour2', status: 'pending', model_name: 'exp03_no_os' })
+    renderPage()
+    await waitFor(() => expect(api.getContourSource).toHaveBeenCalledWith(photo.image_id))
+    await act(async () => { await Promise.resolve() })
+    fireEvent.click(screen.getByRole('button', { name: 'Napravi konture' }))
+    await waitFor(() => expect(api.runContours).toHaveBeenCalledWith({ image_id: photo.image_id, um_per_pixel: null,
+      detection_job_id: 'det-new', source_contour_job_id: 'masks-from-old-boxes' }))
+  })
 })

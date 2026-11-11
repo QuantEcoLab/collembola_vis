@@ -83,6 +83,10 @@ async def run_measurement(req: MeasurementRequest):
     }
     if detections_csv:
         params["detections_csv"] = detections_csv
+        from backend.services.contours import detection_job_for_csv
+        producer = detection_job_for_csv(detections_csv, job_manager)
+        if producer is not None:
+            params["detection_job_id"] = producer.id
     if req.use_annotations:
         snapshot, digest = annotation_snapshot(req.image_id)
         if snapshot is None:

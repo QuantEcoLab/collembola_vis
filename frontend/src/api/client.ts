@@ -7,6 +7,7 @@ import type {
   ImageInfo,
   Job,
   MeasurementRequest,
+  MergedDetections,
   ModelInfo,
   Project,
   ProjectDetail,
@@ -216,6 +217,13 @@ export const getDetectionBoxes = (jobId: string) =>
 // Annotations
 export const getAnnotations = (imageId: string) =>
   request<AnnotationFile>(`/api/annotations/${imageId}`)
+
+/** Preview of a newer detection job merged into the saved annotations (nothing is written). */
+export const mergeDetections = (imageId: string, detectionJobId: string) =>
+  request<MergedDetections>(`/api/annotations/${imageId}/merge-detections`, {
+    method: 'POST',
+    body: JSON.stringify({ detection_job_id: detectionJobId }),
+  })
 
 export const saveAnnotations = (imageId: string, data: AnnotationFile) =>
   request<{ ok: boolean }>(`/api/annotations/${imageId}`, {

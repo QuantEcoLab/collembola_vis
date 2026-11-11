@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { AnnotatedBox, AnnotationFile } from '../api/types'
+import type { AnnotatedBox, AnnotationFile, MergeSummary } from '../api/types'
 import {
   getDetectionBoxes,
   getAnnotations,
+  mergeDetections as mergeDetectionsApi,
   saveAnnotations as saveAnnotationsApi,
 } from '../api/client'
 
@@ -32,6 +33,14 @@ interface UseRefinementResult {
   annotationsSaved: boolean
   /** source_job_id from the annotation file that was auto-restored (null if not from file) */
   restoredSourceJobId: string | null
+  /**
+   * The saved annotations were reviewed for another detection job than the current one: the reviewer's
+   * work is shown, and `mergeDetections` can bring in the current job's boxes.
+   */
+  canMergeDetections: boolean
+  /** Replace model boxes with the current detection job's boxes, keeping added/rejected boxes (unsaved). */
+  mergeDetections: () => Promise<MergeSummary | null>
+  isMerging: boolean
   acceptedCount: number
   rejectedCount: number
   addedCount: number
@@ -56,10 +65,13 @@ export function useRefinement(
   const [boxesImageId, setBoxesImageId] = useState<string | null>(null)
   const current = imageId != null && boxesImageId === imageId
 
+  const [isMerging, setIsMerging] = useState(false)
+
   // Load boxes whenever imageId or detectionJobId changes.
-  // Priority: saved annotations > detection boxes.
-  // Saved annotations represent human-reviewed work and are always preferred,
-  // regardless of which detection job they originated from.
+  // Priority: human-saved annotations > current detection job > annotations written without review.
+  // A file saved from the editor (saved_at) holds the reviewer's work and is always preferred. A file
+  // without saved_at was written from raw detections (e.g. at project import); it only stands in for
+  // its own detection job, so a newer job (e.g. a re-run with the current detector) replaces it.
   useEffect(() => {
     if (!imageId) {
       setBoxes([])
@@ -86,8 +98,10 @@ export function useRefinement(
         let restored = false
         try {
           const ann = await getAnnotations(imageId!)
+          // Only a finished job replaces the file: while a re-run is pending, or if it failed, the file stays.
+          const supersededByNewerJob = !ann.saved_at && !!detectionJobId && detectionDone && ann.source_job_id !== detectionJobId
           // A file written for another photo is never shown on this one.
-          if (ann.image_id === imageId && ann.boxes.length > 0 && !cancelled) {
+          if (ann.image_id === imageId && ann.boxes.length > 0 && !supersededByNewerJob && !cancelled) {
             setBoxes(ann.boxes)
             setAnnotationsSaved(true)
             setRestoredSourceJobId(ann.source_job_id)
@@ -198,6 +212,30 @@ export function useRefinement(
     }
   }, [boxes, boxesImageId])
 
+  const canMergeDetections = current && restoredSourceJobId != null && detectionJobId != null
+    && detectionDone && restoredSourceJobId !== detectionJobId
+
+  const mergeDetections = useCallback(async (): Promise<MergeSummary | null> => {
+    if (!imageId || imageId !== boxesImageId || !detectionJobId) return null
+    setIsMerging(true)
+    setError(null)
+    try {
+      const merged = await mergeDetectionsApi(imageId, detectionJobId)
+      if (merged.image_id !== imageId) throw new Error('Detekcije pripadaju drugoj fotografiji.')
+      setBoxes(merged.boxes)
+      setSelectedId(null)
+      setAnnotationsSaved(false)
+      // Saving now records the merged-in job as the source of the model boxes.
+      setRestoredSourceJobId(merged.source_job_id)
+      return merged.summary
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      return null
+    } finally {
+      setIsMerging(false)
+    }
+  }, [imageId, boxesImageId, detectionJobId])
+
   const visibleBoxes = current ? boxes : NO_BOXES
   return {
     boxes: visibleBoxes,
@@ -217,6 +255,9 @@ export function useRefinement(
     isSaving,
     annotationsSaved: current && annotationsSaved,
     restoredSourceJobId: current ? restoredSourceJobId : null,
+    canMergeDetections,
+    mergeDetections,
+    isMerging,
     acceptedCount: visibleBoxes.filter((b) => b.status === 'accepted').length,
     rejectedCount: visibleBoxes.filter((b) => b.status === 'rejected').length,
     addedCount: visibleBoxes.filter((b) => b.status === 'added').length,
