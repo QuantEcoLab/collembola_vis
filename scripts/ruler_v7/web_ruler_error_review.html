@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="hr">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ruler — pregled loših kontura</title>
+<style>
+  * {box-sizing:border-box} body {margin:0;background:#111820;color:#edf1f6;font:16px system-ui,sans-serif}
+  header {padding:14px 20px;background:#1c2937;position:sticky;top:0;z-index:2}
+  h1 {font-size:21px;margin:0 0 8px} h2 {font-size:18px} p {line-height:1.5}
+  main {max-width:1900px;margin:auto;padding:12px 20px} button, select {font:inherit;padding:9px;margin:3px;border-radius:6px;border:1px solid #6c8198;background:#243549;color:white;cursor:pointer}
+  button[aria-pressed="true"] {background:#245e40;border:2px solid #7de0a0} button:disabled {opacity:.5;cursor:wait}
+  .nav {display:flex;align-items:center;gap:8px;flex-wrap:wrap}.muted {color:#b8c7d7} #status {color:#93e9af;min-height:24px} #status.error {color:#ffb49f}
+  .panels {display:grid;grid-template-columns:repeat(3,minmax(290px,1fr));gap:14px}
+  section {background:#1a2532;border:1px solid #3a4b60;border-radius:8px;padding:12px;margin:12px 0}
+  .imagebox {width:100%;height:520px;background:#080d12;display:flex;align-items:center;justify-content:center;overflow:auto}
+  canvas {max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in} .context {height:470px}
+  .imagebox canvas {width:100%;height:100%}
+  .choices {display:flex;flex-direction:column;gap:2px}.choices button {text-align:left;min-height:45px}
+  .badge {color:#ffd07b} details {margin:15px 0} pre {white-space:pre-wrap;overflow-wrap:anywhere}
+  dialog {background:#111820;color:white;max-width:98vw;max-height:98vh;border:1px solid #8ca6c0;padding:12px}
+  dialog canvas {max-height:85vh;max-width:94vw;width:auto;height:auto;cursor:auto}
+  .zoom-note {font-size:13px;color:#b8c7d7}.loading {opacity:.5}
+  table {border-collapse:collapse;width:100%;margin-top:12px} th,td {border:1px solid #526174;padding:7px;text-align:left}
+  @media(max-width:1000px){.panels{grid-template-columns:1fr}.imagebox{height:480px}}
+</style>
+<header>
+  <h1>Ruler: glavni problem konture — V5 / V7</h1>
+  <div class="nav"><button id="prev">← Prethodni</button><select id="caseSelect" aria-label="Slučaj"></select><button id="next">Sljedeći →</button><button id="pending">Prvi nedovršeni</button><span id="progress"></span></div>
+  <div id="status" role="status" aria-live="polite">Učitavanje…</div>
+</header>
+<main>
+  <h2 id="identity"></h2>
+  <p class="muted">Svaki klik odmah se sprema. Procijeni crop i odaberi po jedan glavni problem za V5 i V7; nakon trećeg odgovora otvara se prvi nedovršeni slučaj. Promjena odgovora dodaje novu reviziju, ne briše prethodnu.</p>
+  <section>
+    <h2>Širi kontekst na ravnalu <span class="muted">— crveni okvir = stvarni ulazni crop</span></h2>
+    <button id="wide">Prikaži još širi kontekst</button>
+    <div class="imagebox context"><canvas id="context"></canvas></div>
+    <p class="zoom-note">Klik na prikaz otvara veći pregled. Procjenjuj trup, ne samo antene ili noge.</p>
+    <div id="cropChoices"></div>
+  </section>
+  <div class="nav"><label for="view">Prikaz modela:</label><select id="view"><option value="contour">Kontura</option><option value="fill">Maska + kontura na originalu</option><option value="mask">Binarna maska</option></select><span class="muted">Oba modela imaju jednaku skalu i boju konture.</span></div>
+  <div class="panels">
+    <section><h2>Originalni crop</h2><div class="imagebox"><canvas id="original"></canvas></div><p id="cropSize" class="muted"></p></section>
+    <section><h2>V5 <span id="v5Missing" class="badge"></span></h2><div class="imagebox"><canvas id="v5"></canvas></div><div class="choices" id="v5Choices"></div></section>
+    <section><h2>V7 <span id="v7Missing" class="badge"></span></h2><div class="imagebox"><canvas id="v7"></canvas></div><div class="choices" id="v7Choices"></div></section>
+  </div>
+  <details><summary>Ranije spremljene odluke (samo za čitanje)</summary><pre id="historical"></pre><p>Novi per-model odgovori ne prepisuju ove odluke. Ranijih 15 razloga nije automatski preslikano na V5 i V7.</p></details>
+  <section><h2>Napredak i sažetak</h2><button id="summary">Prikaži trenutni sažetak</button><p id="nextStep"></p><div id="summaryTable"></div><details><summary>JSON sažetak</summary><pre id="summaryText"></pre></details><p class="muted">Ovo je ciljani pregled prethodno odabranih BOTH_BAD slučajeva. Šest trening ruler scena nije neovisni test. Zaključak o sljedećem koraku čeka dovršetak pregleda.</p></section>
+</main>
+<dialog id="zoom"><button id="closeZoom">Zatvori</button><div><canvas id="zoomCanvas"></canvas></div></dialog>
+<script>
+'use strict';
+let catalog, state, current=0, saving=false, wide=false, generation=0, loaded={}, ready=false;
+const $=id=>document.getElementById(id);
+async function request(url, options) {
+  const response=await fetch(url, options); const data=await response.json();
+  if(!response.ok) throw Error(data.error || `HTTP ${response.status}`); return data;
+}
+function status(message,error=false){$('status').textContent=message;$('status').className=error?'error':'';}
+function image(url){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('Slika nije dostupna: '+url));im.src=url;});}
+function drawOriginal(canvas, im){canvas.width=im.naturalWidth;canvas.height=im.naturalHeight;canvas.getContext('2d').drawImage(im,0,0);}
+function drawModel(canvas, original, mask) {
+  drawOriginal(canvas,original); if(!mask) return;
+  const mode=$('view').value, w=canvas.width,h=canvas.height, ctx=canvas.getContext('2d');
+  const tmp=document.createElement('canvas');tmp.width=w;tmp.height=h;const t=tmp.getContext('2d');t.drawImage(mask,0,0);
+  const values=t.getImageData(0,0,w,h).data; const output=ctx.getImageData(0,0,w,h);const p=output.data;
+  const on=(x,y)=>x>=0&&y>=0&&x<w&&y<h&&values[(y*w+x)*4]>0;
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    const i=(y*w+x)*4, inside=on(x,y);
+    if(mode==='mask'){p[i]=p[i+1]=p[i+2]=inside?255:0;continue;}
+    if(!inside)continue;
+    if(!on(x-1,y)||!on(x+1,y)||!on(x,y-1)||!on(x,y+1)){p[i]=255;p[i+1]=215;p[i+2]=0;}
+    else if(mode==='fill'){p[i]=Math.round(.7*p[i]+.3*255);p[i+1]=Math.round(.7*p[i+1]+.3*215);p[i+2]=Math.round(.7*p[i+2]);}
+  }
+  ctx.putImageData(output,0,0);
+}
+function drawContext(im){
+  const c=$('context');drawOriginal(c,im);const info=catalog.cases[current].contexts[wide?1:0];
+  const [l,t,r,b]=info.box,sx=c.width/(r-l),sy=c.height/(b-t),box=info.crop_box,ctx=c.getContext('2d');
+  ctx.strokeStyle='#ff4545';ctx.lineWidth=3;ctx.strokeRect(box[0]*sx,box[1]*sy,(box[2]-box[0])*sx,(box[3]-box[1])*sy);
+}
+function updateChoices(){
+  const choices=state.decisions[current];
+  for(const model of ['crop','v5','v7'])for(const button of $(model==='crop'?'cropChoices':model+'Choices').querySelectorAll('button')){
+    button.setAttribute('aria-pressed',String(choices[model]?.category===button.dataset.category));button.disabled=saving||!ready;
+  }
+  $('progress').textContent=`Dovršeno ${state.completed}/${state.total} · raniji općeniti razlozi ${catalog.audit.historical_reason_count}/57`;
+  [...$('caseSelect').options].forEach((o,i)=>{const done=Object.values(state.decisions[i]).every(Boolean);o.textContent=`${done?'✓':'○'} ${i+1}. ${catalog.cases[i].source_id} / ${catalog.cases[i].detection_id}`;});
+}
+async function show(index){
+  if(saving)return;
+  current=index;generation++;const token=generation;ready=false;loaded={};wide=false;
+  $('caseSelect').value=String(current);const row=catalog.cases[current];
+  $('identity').textContent=`${current+1}/${catalog.cases.length} · ${row.source_id} · detection ID ${row.detection_id}`;
+  $('cropSize').textContent=`Izvorni crop: ${row.crop_size[0]} × ${row.crop_size[1]} px. Za veći prikaz klikni sliku.`;
+  $('historical').textContent=JSON.stringify({position:row.historical_position,rating:row.historical_rating,reason:row.prior_reason},null,2);
+  $('summaryText').textContent='';$('nextStep').textContent='';$('summaryTable').replaceChildren();$('wide').textContent='Prikaži još širi kontekst';updateChoices();status('Učitavanje postojećeg cropa, maski i konteksta…');
+  for(const id of ['original','v5','v7','context'])$(id).getContext('2d').clearRect(0,0,$(id).width,$(id).height);
+  for(const m of ['v5','v7'])$(m+'Missing').textContent=row.has_masks[m]?'':'— NEMA SPREMLJENE MASKE';
+  try{
+    const base=`/asset?index=${index}&kind=`;
+    const [original,v5,v7,context]=await Promise.all([image(base+'original'),row.has_masks.v5?image(base+'v5'):null,row.has_masks.v7?image(base+'v7'):null,image(base+'context')]);
+    if(token!==generation)return;
+    loaded={original,v5,v7};drawOriginal($('original'),original);drawModel($('v5'),original,v5);drawModel($('v7'),original,v7);drawContext(context);
+    ready=true;updateChoices();status('Spremno. Svaki odgovor sprema se odmah.');
+  }catch(error){if(token===generation)status(error.message,true);}
+}
+async function save(model,category){
+  if(saving||!ready)return;saving=true;updateChoices();status('Spremanje…');
+  try{
+    const result=await request('/api/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({case:current,model,category})});
+    state=result.state;saving=false;updateChoices();
+    if(result.export_warning){status('Odluka je spremljena, ali izvoz sažetka nije uspio: '+result.export_warning,true);return;}
+    status('Spremljeno na remote računalu.');
+    if(Object.values(state.decisions[current]).every(Boolean)){
+      if(state.next_pending!==null)await show(state.next_pending);
+      else{status('Svih 57 slučajeva je dovršeno. Sažetak je spremljen.');await summary();}
+    }
+  }catch(error){saving=false;updateChoices();status('NIJE potvrđeno spremanje: '+error.message+' Ponovi klik; ne prelazi automatski dalje.',true);}
+}
+async function summary(){try{
+  const data=await request('/api/summary');$('summaryText').textContent=JSON.stringify(data,null,2);$('nextStep').textContent=`${data.completed_cases}/${data.total_cases} dovršeno. ${data.next_step}`;
+  const table=document.createElement('table'),head=table.createTHead().insertRow();
+  for(const label of ['Izvor','Model','Crop','Glavni problem','Broj']){const th=document.createElement('th');th.textContent=label;head.append(th);}
+  const body=table.createTBody();for(const row of data.counts_by_source_model_crop_and_error){const tr=body.insertRow();
+    for(const value of [row.source_id,row.model.toUpperCase(),catalog.crop_states[row.crop_condition]||row.crop_condition,catalog.errors[row.error_type]||row.error_type,row.count])tr.insertCell().textContent=value;
+  }
+  $('summaryTable').replaceChildren(table);
+}catch(error){status(error.message,true);}}
+function buildChoices(container,model,choices){for(const [category,label] of Object.entries(choices)){const button=document.createElement('button');button.type='button';button.dataset.category=category;button.textContent=label;button.onclick=()=>save(model,category);$(container).append(button);}}
+$('prev').onclick=()=>show(Math.max(0,current-1));$('next').onclick=()=>show(Math.min(catalog.cases.length-1,current+1));
+$('pending').onclick=()=>{if(state.next_pending!==null)show(state.next_pending);};$('caseSelect').onchange=e=>show(Number(e.target.value));
+$('view').onchange=()=>{if(loaded.original)for(const m of ['v5','v7'])drawModel($(m),loaded.original,loaded[m]);};
+$('wide').onclick=async()=>{
+  if(!ready||saving)return;const token=generation;const index=current;wide=!wide;const requested=wide;
+  ready=false;updateChoices();$('wide').disabled=true;status('Učitavanje šireg konteksta…');
+  try{const im=await image(`/asset?index=${index}&kind=context&wide=${wide?1:0}`);if(token===generation&&requested===wide){drawContext(im);$('wide').textContent=wide?'Vrati uži kontekst':'Prikaži još širi kontekst';status('Kontekst je učitan.');}}
+  catch(error){if(token===generation){wide=!requested;status(error.message,true);}}
+  finally{$('wide').disabled=false;if(token===generation){ready=true;updateChoices();}}
+};
+$('summary').onclick=summary;
+for(const id of ['original','v5','v7','context'])$(id).onclick=()=>{if(!ready)return;const im=$(id),canvas=$('zoomCanvas');canvas.width=im.width;canvas.height=im.height;canvas.getContext('2d').drawImage(im,0,0);canvas.style.width=(id==='context'?1600:Math.max(850,im.width))+'px';$('zoom').showModal();};
+$('closeZoom').onclick=()=>$('zoom').close();
+(async()=>{try{
+  catalog=await request('/api/state');state=catalog.state;
+  for(const row of catalog.cases){const option=document.createElement('option');option.value=row.index;$('caseSelect').append(option);}
+  buildChoices('cropChoices','crop',catalog.crop_states);for(const m of ['v5','v7'])buildChoices(m+'Choices',m,catalog.errors);
+  await show(state.next_pending??0);
+}catch(error){status(error.message,true);}})();
+</script>
+</html>

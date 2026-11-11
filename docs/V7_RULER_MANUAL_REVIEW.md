@@ -1,6 +1,144 @@
 # Raw Contour Review
 
-## Portable review commands
+## Remote SSH: headless web review of the 57 BOTH_BAD cases
+
+The Linux remote has no `DISPLAY`/`WAYLAND_DISPLAY` and its active Python has no
+`cv2`. The Tkinter tools below therefore cannot be used there as-is. Use the
+headless review instead; it needs only system Python and Pillow, no model runtime:
+
+```bash
+python3 -B scripts/ruler_v7/web_ruler_error_review.py --check
+python3 -B scripts/ruler_v7/web_ruler_error_review.py --port 8765
+```
+
+In VS Code **Ports**, forward remote port **8765** and open the displayed local
+address in a browser (normally `http://localhost:8765`). The server binds only to
+remote `127.0.0.1`. Keep that terminal running; Ctrl+C stops it. Repeating the
+same command resumes the first incomplete case from saved decisions.
+
+The default asset root is the verified external snapshot:
+`/home/jana/collembola-rescue/incoming/ruler-v7-20261027T162453Z/snapshot/repo/`.
+Use `--assets-root` if its location changes. It reads the existing raw crop and
+V5/V7 masks directly; it does not copy assets, run inference, or create new
+comparison/contact-sheet files. Browser canvases render the stored masks as
+contours, a filled overlay, or a binary mask. Wider ruler context is cropped from
+the source photograph on demand in memory; its red box matches the recorded
+floor/ceil crop bounds. Click a panel for a larger view.
+
+### What is finished, and what needs this review
+
+- Position review: 130/130, including 93 R cases, finished.
+- V5/V7 relative ratings: 93/93, including 57 BOTH_BAD, finished.
+- Earlier coarse cause review: 15/57 finished; 42 lacked a cause.
+- New detailed review: a framing decision plus one error category **per model**.
+  The old 15 causes are read-only references, not automatically inferred V5/V7
+  categories. The 42 cases without an earlier cause appear first, followed by
+  the 15 with earlier references. All 57 need the new per-model fields.
+
+For each case, select whether the body is complete in the crop, cut by its edge,
+or unclear. Then rate V5 and V7 separately: BODY_PART_MISSING, RULER_INCLUDED,
+TOO_LARGE, TOO_SMALL, MULTIPLE_PROBLEMS, or UNASSESSABLE. Every click commits
+immediately. The next incomplete case opens once its three choices are saved.
+Missing masks have an explicit badge and are never replaced with invented masks.
+
+### Independent storage and summary
+
+New decisions are saved only under ignored
+`outputs/ruler_v7_body_error_review/`:
+
+- `review.sqlite3`: append-only event history; revising a new answer appends a
+  revision without deleting an earlier answer/timestamp.
+- `summary.json`: progress, crop/framing evidence and a provisional next-step
+  recommendation only when the detailed review is complete.
+- `summary_by_source_model_error.csv`: counts by source, model, framing condition
+  and error type, including `ALL` aggregate rows and explicit `PENDING` entries.
+
+`--output-dir` chooses a separate review directory. Input table fingerprints
+prevent accidentally resuming decisions against a changed catalog. Original
+position/relative-rating/cause CSVs, source/detection IDs, masks, annotations and
+weights remain untouched. An answer is considered saved only after the browser
+receives confirmation; failed requests do not automatically advance.
+
+The final next-step evidence distinguishes truncated input bodies (try crop /
+padding first) from segmentation errors on complete bodies or inclusion of ruler
+marks (new targeted mask annotations, then consider fine-tuning). Mixed evidence
+supports a combination. An unclear review is not sufficient justification for a
+dataset/model change. No training or production-model change is triggered by this
+tool. **The six training ruler scenes are not an independent held-out test.**
+
+## Independent reference annotation after the completed error review
+
+Do not reopen the finished 57-case error rating to draw reference polygons. The
+separate `prepare_reference_annotation_pack.py` tool builds the explicitly listed
+12-case pack from `outputs/ruler_v7_body_error_review/annotation_candidates.csv`;
+it refuses to overwrite an existing pack. Its output is
+`outputs/ruler_v7_reference12_v1/`, containing unchanged raw crops, wider clean
+annotation images and context, separate V5/V7 reference masks, hashes and source
+coordinate mappings. It creates no initial annotation JSON and assigns no data
+to training. `README.md` in the pack describes the exact 3/3/2/2/2 selection and
+the source-level split proposal (not applied).
+
+```bash
+python3 -B scripts/ruler_v7/web_reference_annotation.py --port 8766
+```
+
+Forward port 8766 in VS Code. Draw the target body from scratch: click vertices,
+Enter closes, Z undoes, drag vertices to correct, wheel zooms, Space+drag pans,
+S saves a new LabelMe polygon and proceeds. Mask references are separate and
+collapsed by default; there is no prediction-to-polygon import. New manual
+LabelMe JSON files go to the pack's `annotations/`, and every save is also kept
+in `annotation_history/`. The larger annotation images may contain other bodies;
+this is a single-target reference task, not a fully annotated training dataset.
+
+Potential future split: C_1_2_Collembola005 and C_1_3_Collembola006 for training,
+C_3_2_Collembola011 for validation, and C_4_1_PS_500-1000_014 plus
+C_5_1_PS_500-1000_017 reserved from all training/tuning. The latter two were
+already visually inspected; they are not a blind untouched test. Confirm source
+membership and final evaluation protocol before any dataset/model change.
+
+## Additional training-source annotations (awaiting approval to launch)
+
+`prepare_additional_training_annotations.py` prepares a separate 22-case pack at
+`outputs/ruler_v7_additional_train22_v1/`: 11 targets from C_1_2_Collembola005
+and 11 from C_1_3_Collembola006. It excludes all prior 12 IDs, truncated and
+unassessable cases, non-R targets, and every validation/final-test source.
+`selection.csv` gives exact original asset paths and saved V5/V7 selection reasons.
+The original raw PNG is the annotation image (byte-identical, native dimensions),
+not a padded image or comparison panel. Context and prediction references are
+separate. No YOLO dataset is built.
+
+The shared web editor now accepts arbitrary nonempty, uniquely keyed packs.
+The additional pack opts into automatic save-and-next on closing a valid polygon;
+closed-vertex edits save on release. Legacy packs keep explicit-save behaviour.
+V5/V7 contours or binary masks can be enabled separately; they are never copied
+into a manual polygon. Saved LabelMe files preserve raw dimensions, source crop
+origin and IDs; immutable revisions and resume are supported.
+
+User confirmation of the 22-case selection is required **before** launching a
+server for this pack. The proposed port is 8767. Existing 12-case files must not
+be overwritten, and validation/held-out sources must not be added to this pack.
+
+## Preparing the isolated manual-label dataset candidate (no training)
+
+`build_reviewed_ruler_dataset.py` reads the 12+22 manual annotations, maps their
+unchanged vertices into full-source coordinates, and prepares standard/tight
+native-resolution candidates under `outputs/ruler_yolo_seg_candidate_v1/`.
+It refuses to overwrite an existing output. Each of the 34 references requires
+an explicit visual decision in `audit_decisions.json` before export. Uncertain
+neighbour cases are blocked, not treated as background. A paired candidate for
+det713/det722 uses both existing manual polygons; no model mask becomes a label.
+
+The separate `audit_reviewed_ruler_dataset.py` checks actual exported image pixels
+against the source photographs, reparses YOLO labels, verifies vertex roundtrip
+and source separation, then writes a read-only `index.html` gallery. Current
+candidate results are 20 train images/21 polygons, 1 val image/1 polygon and
+3 test images/3 polygons. Nine references need neighbour/boundary work; one
+reference is covered by the two-body paired image instead of duplicating it.
+Existing source annotations and datasets are not overwritten. No training is
+started by either script. The output README and manifests document all reasons
+and the small-sample/non-blind-test limitations; user visual approval is pending.
+
+## Portable legacy review commands
 
 Tools are under `scripts/ruler_v7/`; preserved review tables are under
 `reports/ruler_v7/manual_review/`. Original crop/mask paths in `index.csv` still

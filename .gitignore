@@ -54,6 +54,7 @@ data/web_outputs/
 *.tar
 *.tar.gz
 .venv/
+.venv-ruler-ft/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -62,6 +63,14 @@ data/web_outputs/
 collembola-rescue/
 backup/
 backups/
+
+# Local credentials and transient build/runtime files must never be published.
+.env
+.env.*
+!.env.example
+.preview_auth_secret
+*.log
+*.tsbuildinfo
 
 # Small approved research manifests live outside the ignored data/runs trees.
 !reports/ruler_v7/**/*.csv
