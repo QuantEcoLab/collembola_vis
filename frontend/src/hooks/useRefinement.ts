@@ -7,6 +7,7 @@ import {
 } from '../api/client'
 
 const MIN_BOX_PX = 5 // ignore accidental drags smaller than this threshold
+const NO_BOXES: AnnotatedBox[] = []
 
 interface DrawingBox {
   x1: number; y1: number; x2: number; y2: number
@@ -50,6 +51,10 @@ export function useRefinement(
   const [annotationsSaved, setAnnotationsSaved] = useState(false)
   const [restoredSourceJobId, setRestoredSourceJobId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // Photo the box state belongs to. Everything returned below is gated on it, so the
+  // render in which `imageId` changes can never pair the new photo with old boxes.
+  const [boxesImageId, setBoxesImageId] = useState<string | null>(null)
+  const current = imageId != null && boxesImageId === imageId
 
   // Load boxes whenever imageId or detectionJobId changes.
   // Priority: saved annotations > detection boxes.
@@ -58,6 +63,7 @@ export function useRefinement(
   useEffect(() => {
     if (!imageId) {
       setBoxes([])
+      setBoxesImageId(null)
       setSelectedId(null)
       setAnnotationsSaved(false)
       setRestoredSourceJobId(null)
@@ -68,6 +74,7 @@ export function useRefinement(
     setIsLoading(true)
     setError(null)
     setBoxes([])
+    setBoxesImageId(imageId)
     setSelectedId(null)
     setAnnotationsSaved(false)
     setRestoredSourceJobId(null)
@@ -79,7 +86,8 @@ export function useRefinement(
         let restored = false
         try {
           const ann = await getAnnotations(imageId!)
-          if (ann.boxes.length > 0 && !cancelled) {
+          // A file written for another photo is never shown on this one.
+          if (ann.image_id === imageId && ann.boxes.length > 0 && !cancelled) {
             setBoxes(ann.boxes)
             setAnnotationsSaved(true)
             setRestoredSourceJobId(ann.source_job_id)
@@ -91,7 +99,11 @@ export function useRefinement(
 
         if (!restored && detectionJobId && !cancelled) {
           const result = await getDetectionBoxes(detectionJobId!)
-          if (!cancelled) setBoxes(result.boxes)
+          if (!cancelled && result.image_id && result.image_id !== imageId) {
+            setError('Detekcije pripadaju drugoj fotografiji; pravokutnici nisu prikazani.')
+          } else if (!cancelled) {
+            setBoxes(result.boxes)
+          }
         }
       } catch (e: any) {
         if (!cancelled) setError(e.message)
@@ -169,6 +181,7 @@ export function useRefinement(
     imageFilename: string,
     detectionJobId: string,
   ) => {
+    if (imageId !== boxesImageId) throw new Error('Oznake pripadaju drugoj fotografiji; nisu spremljene.')
     setIsSaving(true)
     try {
       const payload: AnnotationFile = {
@@ -183,17 +196,18 @@ export function useRefinement(
     } finally {
       setIsSaving(false)
     }
-  }, [boxes])
+  }, [boxes, boxesImageId])
 
+  const visibleBoxes = current ? boxes : NO_BOXES
   return {
-    boxes,
+    boxes: visibleBoxes,
     isLoading,
     error,
     toggleBox,
     removeBox,
     loadBoxes,
     updateBox,
-    selectedId,
+    selectedId: current ? selectedId : null,
     selectBox,
     drawingBox,
     startDraw,
@@ -201,10 +215,10 @@ export function useRefinement(
     commitDraw,
     saveAnnotations,
     isSaving,
-    annotationsSaved,
-    restoredSourceJobId,
-    acceptedCount: boxes.filter((b) => b.status === 'accepted').length,
-    rejectedCount: boxes.filter((b) => b.status === 'rejected').length,
-    addedCount: boxes.filter((b) => b.status === 'added').length,
+    annotationsSaved: current && annotationsSaved,
+    restoredSourceJobId: current ? restoredSourceJobId : null,
+    acceptedCount: visibleBoxes.filter((b) => b.status === 'accepted').length,
+    rejectedCount: visibleBoxes.filter((b) => b.status === 'rejected').length,
+    addedCount: visibleBoxes.filter((b) => b.status === 'added').length,
   }
 }

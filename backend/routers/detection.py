@@ -1,5 +1,7 @@
 """Detection endpoints."""
 
+from pathlib import Path
+
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -85,4 +87,9 @@ async def get_detection_boxes(job_id: str):
             "conf": float(row.get("confidence", row.get("conf", 1.0))),
             "status": "accepted",
         })
-    return {"boxes": boxes}
+    # Lets the workspace refuse boxes of a job that belongs to another photo.
+    result = job.result
+    image_id = result.get("image_id") or (result.get("image_identity") or {}).get("image_id") or job.params.get("image_id")
+    if not image_id and result.get("image_path"):
+        image_id = Path(result["image_path"]).parent.name  # data/uploads/<image_id>/<file>
+    return {"image_id": image_id, "boxes": boxes}

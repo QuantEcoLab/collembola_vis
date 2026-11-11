@@ -268,21 +268,25 @@ export default function WorkspacePage() {
   const hasNext = currentSiblingIndex >= 0 && currentSiblingIndex < siblingImages.length - 1
 
   // ── Derived State ───────────────────────────────────────────────────
-  const [contourOverlayUrl, setContourOverlayUrl] = useState<string | null>(null)
+  const [contourOverlay, setContourOverlay] = useState<{ url: string; jobId: string } | null>(null)
   useEffect(() => {
     const controller = new AbortController()
     let url: string | null = null
-    setContourOverlayUrl(null)
+    setContourOverlay(null)
     if (measurementDone && measureJob) {
-      getContourOverview(measureJob.id, controller.signal).then(blob => {
+      const jobId = measureJob.id
+      getContourOverview(jobId, controller.signal).then(blob => {
         if (!controller.signal.aborted) {
           url = URL.createObjectURL(blob)
-          setContourOverlayUrl(url)
+          setContourOverlay({ url, jobId })
         }
       }).catch(error => { if (!controller.signal.aborted) setContourError(error.message) })
     }
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url) }
   }, [measurementDone, measureJob?.id])
+  // Shown only while it belongs to the current photo's measurement (measurementDone checks the
+  // photo), never for the render in which the photo or job has just changed.
+  const contourOverlayUrl = contourOverlay && measurementDone && contourOverlay.jobId === measureJob?.id ? contourOverlay.url : null
   const hasContourOverlay = contourOverlayUrl !== null
 
   // Determine which image to show based on overlay mode

@@ -211,7 +211,7 @@ export const outputFileUrl = (jobId: string, filename: string) =>
 
 // Detection boxes (raw CSV as JSON)
 export const getDetectionBoxes = (jobId: string) =>
-  request<{ boxes: AnnotatedBox[] }>(`/api/detection/boxes/${jobId}`)
+  request<{ image_id?: string | null; boxes: AnnotatedBox[] }>(`/api/detection/boxes/${jobId}`)
 
 // Annotations
 export const getAnnotations = (imageId: string) =>
