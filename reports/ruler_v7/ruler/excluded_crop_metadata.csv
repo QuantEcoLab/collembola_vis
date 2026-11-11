@@ -1,0 +1,2 @@
+crop_id,crop_file,source_image,source_width,source_height,x1,y1,x2,y2,width,height,reason,excluded_reason
+C5_2_Fe2O3003_ruler_dense,data\ruler_manual_annotation_v1\images\C5_2_Fe2O3003_ruler_dense__x3750_y900_w5350_h3000.png,data/slike/C5_2_Fe2O3003 (1).jpg,10267,10267,3750,900,9100,3900,5350,3000,Original Fe2O3 image with very dense organisms on ruler ticks and numbers; selected as ruler-only hard case from original photo.,Excluded from manual annotation set because it contains too many individuals.

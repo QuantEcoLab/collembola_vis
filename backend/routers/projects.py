@@ -6,7 +6,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response as APIResponse
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -91,7 +91,7 @@ class UpdateJobsRequest(BaseModel):
 
 class BatchMeasureRequest(BaseModel):
     um_per_pixel: float
-    method: str = "fast"
+    method: str = "centerline_circular_sections_v2"
     device: str | None = None
 
 
@@ -123,8 +123,13 @@ async def create_project(
 
 
 @router.get("")
-async def list_projects():
-    return db_projects.list_projects()
+def list_projects(response: APIResponse):
+    # SQLite/lock waits run in FastAPI's thread pool, not on the ASGI event loop.
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return db_projects.list_projects()
+    except db_projects.ProjectsDatabaseBusy as exc:
+        raise HTTPException(503, str(exc), headers={"Retry-After": "2", "Cache-Control": "no-store"}) from exc
 
 
 @router.get("/{project_id}")
@@ -371,7 +376,7 @@ async def batch_measure(
             "image_path": info["path"],
             "filename": img["filename"],
             "detection_job_id": img["detection_job_id"],
-            "use_annotations": False,  # batch always uses raw detections
+            "use_annotations": img["has_annotation"],
         })
 
     if not image_entries:
@@ -409,6 +414,9 @@ async def download_results_zip(
             job = job_manager.get(img["measurement_job_id"])
             if job is None or not job.result:
                 continue
+            from backend.services.centerline_measurement import METHOD
+            if job.result.get("measurement_method") != METHOD:
+                raise HTTPException(409, "Prije izvoza ponovno izračunajte mjerenja projekta središnjom linijom.")
             csv_path = job.result.get("csv_path")
             if not csv_path:
                 continue

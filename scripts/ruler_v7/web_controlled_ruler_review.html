@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="hr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Kontrolirani ruler pregled — exp02_os5</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101923;color:#ecf3fb;font:15px system-ui}header{position:sticky;top:0;background:#203044;padding:10px 18px;z-index:2}h1{font-size:20px;margin:0 0 8px}h2{font-size:17px}button,select,input,textarea{font:inherit;color:inherit;background:#293e55;border:1px solid #8a9cb0;border-radius:4px;padding:7px}button{cursor:pointer;margin:3px}button:disabled{opacity:.4;cursor:default}select{max-width:600px}main{max-width:2000px;margin:auto;padding:14px}section{background:#1b2938;border-radius:7px;padding:12px;margin-bottom:12px}.panels{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.work{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}canvas{background:#080f17;max-width:100%}.preview{width:100%;height:300px;object-fit:contain}#editor{width:100%;height:620px;touch-action:none;cursor:crosshair}#context{width:100%;height:450px;object-fit:contain}textarea{width:100%}.muted{color:#b8cadb}.warning{color:#ffd28c}#status{min-height:25px;color:#9eebba}#status.error{color:#ffb2a6}#policy{padding:10px;border-left:4px solid #77bdff}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}label.check{display:block;margin:10px 0}button.active{background:#28664d}[hidden]{display:none!important}@media(max-width:1050px){.panels,.work{grid-template-columns:1fr}.preview{height:260px}}
+</style>
+<style>#decisionFlash{position:fixed;top:125px;left:50%;transform:translateX(-50%);padding:13px 24px;border:2px solid #8df5b7;background:#174432;color:white;border-radius:8px;z-index:5;font-size:20px;pointer-events:none;box-shadow:0 4px 22px #0009}.fastHelp{font-size:13px;color:#bed6e9}</style>
+<header><h1>Kontrolirani ručni pregled — fiksirani exp02_os5</h1>
+<label>Način <select id="role"><option value="train">TRAIN — pregled prijedloga</option><option value="val">VAL — slijepi GT</option><option value="test">TEST — slijepi GT</option></select></label>
+<button id="prev">← Prethodni (B / ←)</button><select id="case"></select><button id="next">Sljedeći (N / →)</button><button id="pending">Prvi nedovršeni</button>
+<label><input id="fastReview" type="checkbox" checked> Brzi pregled</label><button id="reopenLast">Vrati zadnju odluku na PENDING (U)</button>
+<div class="fastHelp">Brzi pregled: 1–5 sprema i ide na sljedeći nedovršeni slučaj. Za 1 i 2 pritisak potvrđuje obje kućice. U čuva cijelu povijest.</div>
+<span id="progress"></span><div id="status" role="status">Učitavanje…</div></header>
+<div id="decisionFlash" role="status" aria-live="assertive" hidden></div>
+<main><h2 id="identity"></h2><p id="policy"></p>
+<section id="recovery" hidden><strong>Pronađen je lokalni nespremljeni nacrt.</strong> <span id="recoveryText"></span><button id="restore">Vrati lokalni nacrt</button><button id="discardLocal">Zadrži stanje poslužitelja</button></section>
+<div class="panels"><section><h2 id="cropTitle">Originalni crop</h2><canvas class="preview" id="original"></canvas></section>
+<section class="model"><h2>Početni V7 — puna maska na originalu</h2><canvas class="preview" id="initial"></canvas></section>
+<section class="model"><h2>exp02_os5 — puna maska na originalu</h2><canvas class="preview" id="candidate"></canvas></section></div>
+<div class="work"><section><h2>Konačna ljudska kontura — originalne pikselne koordinate</h2><canvas id="editor"></canvas>
+<p class="muted">Klik: dodaj vrh; povuci vrh: pomak; Shift+klik na rub: umetni vrh. Desni klik na vrh ili Delete: izbriši vrh. Z: undo. Kotačić: zoom; Space+povlačenje ili srednja tipka: pomak. Poligon se zatvara automatski od 3 vrha.</p>
+<button id="undo">Undo (Z)</button><button id="hide">Sakrij konturu</button><button id="fit">Prilagodi pogled</button><button id="newPolygon">Nova kontura</button><select id="polygon"></select><button id="clear">Obriši konture</button><button id="proposal">Reset na prijedlog</button><button id="reference">Učitaj ljudsku referencu</button><p id="vertices" class="muted"></p>
+<label class="check"><input id="whole" type="checkbox"> Potvrđujem da je cijeli ciljni trup pouzdano označen (nije odrezan/nejasan).</label>
+<label class="check"><input id="neighbour" type="checkbox"> Potvrđujem da nema neoznačene susjedne jedinke zbog koje bi crop bio neprikladan za trening.</label>
+<label>Bilješka<textarea id="notes" rows="2"></textarea></label>
+<div id="decisions"><button data-decision="1">1 · Prihvati bez izmjene</button><button data-decision="2">2 · Ručno ispravljeno / potvrdi GT</button><button data-decision="3">3 · Lažna detekcija</button><button data-decision="4">4 · Nejasno / odrezano</button><button data-decision="5">5 · Neoznačeni susjed</button></div>
+<button id="saveDraft">Spremi nacrt</button><button id="unlock" hidden>Otključaj GT uz zabilježen razlog</button>
+</section><section><h2>Širi kontekst — crveno = izvorni crop</h2><canvas id="context"></canvas><p id="referenceInfo"></p><p id="flags" class="warning"></p><h2 id="result"></h2><pre id="metrics"></pre><details><summary>Metapodaci i povijest</summary><pre id="metadata"></pre><button id="history">Učitaj povijest</button><pre id="historyText"></pre></details></section></div>
+<p class="muted">Odluke i nacrti spremaju se automatski uz nepromjenjive povijesne revizije. Kandidati za budući trening: isključivo eksplicitno prihvaćene/ispravljene, geometrijski valjane TRAIN oznake s obje potvrde. Nejasni cropovi i susjedi nisu train pozadina.</p></main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), clone=v=>JSON.parse(JSON.stringify(v));
+let catalogue,detail,index=0,role='train',polygons=[],active=0,selected=-1,undoStack=[],original=null,scale=1,ox=0,oy=0,drag=null,space=false,visible=true,busy=false,dirty=false,timer=null,referenceId=null,localRecovery=null,pointerEditing=false,flashTimer=null;
+const heldKeys=new Set(),decisionNames={1:'ACCEPTED_UNCHANGED',2:'MANUALLY_CORRECTED',3:'FALSE_DETECTION',4:'AMBIGUOUS_OR_TRUNCATED',5:'UNLABELED_NEIGHBOUR'};
+const fastReview=()=>$('fastReview').checked;
+try{$('fastReview').checked=localStorage.getItem('controlled-ruler-fast-review')!=='false';}catch(e){/* Default fast mode remains available. */}
+$('fastReview').onchange=()=>{try{localStorage.setItem('controlled-ruler-fast-review',String(fastReview()));}catch(e){}if(detail)renderInfo();};
+async function flash(text){clearTimeout(flashTimer);$('decisionFlash').textContent=text;$('decisionFlash').hidden=false;await new Promise(resolve=>setTimeout(resolve,160));}
+function hideFlash(){clearTimeout(flashTimer);flashTimer=setTimeout(()=>$('decisionFlash').hidden=true,500);}
+const editable=()=>detail&&!detail.state.locked&&!busy;
+function status(text,error=false){$('status').textContent=text;$('status').className=error?'error':'';}
+async function request(url,data){const r=await fetch(url,data?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{});const v=await r.json();if(!r.ok)throw Error(v.error||r.status);return v;}
+function image(url){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('Slika nije dostupna'));im.src=url;});}
+function key(){return 'controlled-ruler-v1:'+detail.original_sha256+':'+detail.case_id;}
+function payload(){return {index,revision:detail.state.revision,polygons:clone(polygons),notes:$('notes').value,reference_id:referenceId,checks:{whole_body:$('whole').checked,no_unlabeled_neighbour:$('neighbour').checked}};}
+function backup(){try{localStorage.setItem(key(),JSON.stringify(payload()));}catch(e){status('Lokalna sigurnosna kopija nije dostupna: '+e.message,true);}}
+function removeBackup(){try{localStorage.removeItem(key());}catch(e){/* Server copy remains authoritative. */}}
+function remember(){undoStack.push(clone(polygons));if(undoStack.length>100)undoStack.shift();}
+function changed(){dirty=true;backup();clearTimeout(timer);timer=setTimeout(()=>saveDraft(),700);controls();draw();}
+function setData(d){detail=d;polygons=clone(d.state.has_draft||d.state.category!=='PENDING'?d.state.polygons:(d.role==='train'?d.predictions.proposal:[]));active=0;selected=-1;referenceId=d.state.reference_id;$('notes').value=d.state.notes;$('whole').checked=!!d.state.checks.whole_body;$('neighbour').checked=!!d.state.checks.no_unlabeled_neighbour;undoStack=[];dirty=false;}
+function controls(){
+ const locked=!!detail?.state.locked;
+ for(const id of ['role','case','prev','next','pending','fastReview'])$(id).disabled=busy;
+ $('reopenLast').disabled=busy||!!drag||pointerEditing||!catalogue?.last_decision;
+ $('reopenLast').title=catalogue?.last_decision?`${catalogue.last_decision.source_id} / ${catalogue.last_decision.detection_id}: ${catalogue.last_decision.category}`:'Nema spremljene odluke za vraćanje';
+ for(const id of ['undo','clear','newPolygon','polygon','whole','neighbour','notes','saveDraft'])$(id).disabled=!editable();
+ $('proposal').hidden=role!=='train';$('proposal').disabled=!editable();$('reference').disabled=!editable()||!detail?.human_reference?.usable_losslessly;
+ $('unlock').hidden=!locked;$('unlock').disabled=busy;
+ for(const b of document.querySelectorAll('[data-decision]')){b.disabled=!editable();b.hidden=role!=='train'&&b.dataset.decision==='1';}
+ $('polygon').replaceChildren();polygons.forEach((p,i)=>{const option=new Option(`Kontura ${i+1} · ${p.length} vrhova`,i);$('polygon').add(option);});$('polygon').value=active;
+ $('vertices').textContent=`${detail?.width||0} × ${detail?.height||0} px · ${polygons.reduce((a,p)=>a+p.length,0)} vrhova${dirty?' · nespremljeni nacrt':''}`;
+}
+function rows(){return catalogue.cases.filter(c=>c.role===role);}
+function navigation(){const p=catalogue.progress[role];$('progress').textContent=`${p.done} / ${p.total} dovršeno`;$('case').replaceChildren();for(const c of rows())$('case').add(new Option(`${c.category==='PENDING'?'○':'✓'} ${c.source_id} / ${c.detection_id}`,c.index));$('case').value=index;}
+async function flush(){clearTimeout(timer);if(dirty)return await saveDraft();return true;}
+async function saveDraft(){
+ if(busy||drag||pointerEditing)return false;if(!dirty)return true;if(!editable())return false;
+ const p=payload();busy=true;controls();
+ try{const d=await request('/api/draft',p);detail=d;dirty=false;removeBackup();renderInfo();status('Nacrt spremljen.');await refreshCatalogue();return true;}
+ catch(e){status('Nacrt NIJE spremljen: '+e.message,true);return false;}
+ finally{busy=false;controls();draw();}
+}
+async function refreshCatalogue(){catalogue=await request('/api/catalogue');navigation();}
+async function show(i){
+ if(busy||drag||pointerEditing)return;if(!await flush())return;busy=true;controls();status('Učitavanje…');
+ try{
+  const d=await request('/api/case?index='+i);index=i;role=d.role;$('role').value=role;setData(d);original=null;drag=null;visible=true;$('hide').textContent='Sakrij konturu';$('historyText').textContent='';$('recovery').hidden=true;localRecovery=null;
+  for(const id of ['original','initial','candidate','editor','context']){const c=$(id);c.getContext('2d').clearRect(0,0,c.width,c.height);}
+  navigation();renderInfo();
+  const loaded=await image(`/asset?index=${i}&kind=original`);original=loaded;paintPreview($('original'),loaded);if(d.crop_frame){const ctx=$('original').getContext('2d'),b=d.crop_frame.old_box_in_new;ctx.strokeStyle='#55dfff';ctx.lineWidth=1;ctx.setLineDash([5,3]);ctx.strokeRect(b[0],b[1],b[2]-b[0],b[3]-b[1]);}fit();
+  if(d.predictions){const masks=await Promise.all(['initial','candidate'].map(kind=>image(`/asset?index=${i}&kind=${kind}`)));masks.forEach((im,n)=>paintPreview($(n?'candidate':'initial'),loaded,im));}
+  const context=await image(`/asset?index=${i}&kind=context`);paintContext(context);
+  let local=null;try{local=JSON.parse(localStorage.getItem(key())||'null');}catch(e){status('Lokalni nacrt nije čitljiv.',true);}
+  if(local&&!d.state.locked){localRecovery=local;$('recovery').hidden=false;$('recoveryText').textContent=local.revision===d.state.revision?'Nacrt pripada istoj reviziji.':'Poslužitelj ima drugu reviziju; vraćanje će stvoriti novi nacrt uz postojeću povijest.';}
+  status(d.state.locked?'GT zaključan — modeli su sada otkriveni.':d.blind_before_lock?'Slijepi način: modeli nedostupni dok ne spremiš i zaključaš GT.':'TRAIN: pregledaj prijedlog i odaberi odluku.');
+ }catch(e){status(e.message,true);}finally{busy=false;controls();draw();}
+}
+function renderInfo(){
+ const d=detail,s=d.state;$('identity').textContent=`${role.toUpperCase()} · ${d.source_id} · detection ${d.detection_id}`;
+ if(d.crop_frame){$('identity').textContent+=` · v2 prošireni crop ${d.width} × ${d.height} px`;$('cropTitle').textContent='Prošireni crop v2 · cijan = stari crop';document.querySelector('header h1').textContent='Kontrolirani ručni pregled v2 — prošireni cropovi';document.title='v2 prošireni cropovi — exp02_os5';}else{$('cropTitle').textContent='Originalni crop';}
+  $('policy').textContent=role==='train'?`TRAIN: original, početni V7 i exp02_os5 su vidljivi. ${fastReview()?'Brzi pregled: odluka 1 ili 2 automatski bilježi obje potvrde.':'Pozitivna odluka zahtijeva obje potvrde ispod editora.'}`:s.locked?'GT je zaključan. Prikazane su predikcije i metrike. Svaka kasnija revizija ostaje označena kao model-exposed.':`SLIJEPI ${role.toUpperCase()}: nacrtaj GT od nule ili potvrdi dokazano mapiranu ljudsku referencu. Odluka 2/3/4/5 sprema i zaključava GT prije otkrivanja modela.${s.model_exposed?' Ovaj slučaj već je bio izložen modelima; nova revizija nije prvobitno slijepa.':''}`;
+ document.querySelectorAll('.model').forEach(e=>e.hidden=!d.predictions);
+ const ref=d.human_reference;$('referenceInfo').textContent=ref?`Ljudska referenca ${ref.id}: ${ref.usable_losslessly?'dostupna bez gubitka':'NIJE upotrebljiva u ovom cropu'}. ${ref.mapping_note}`:'Nema prethodne ljudske reference.';
+ $('flags').textContent=d.predictions?`exp02_os5: ${d.predictions.has_mask?'maska postoji':'NEMA MASKE'}; confidence ${d.predictions.confidence??'—'}; komponente ${d.predictions.connected_components}; rupe ${d.predictions.holes}; dodir ruba ${d.predictions.touches_crop_edge}. Editorov prijedlog predstavlja najveću vanjsku konturu; usporedni paneli i metrike koriste punu spremljenu masku.${d.initial_has_mask?'':' Početni V7: nema spremljene maske.'}`:'';
+ $('result').textContent=`Odluka: ${s.category}${s.training_candidate?' · kandidat za trening':''}${s.locked?' · ZAKLJUČANO':''}${s.crop_migration?' · preneseno iz v1':''}${s.expanded_context_review_required?' · provjeriti novi kontekst prije treninga':''}`;
+ $('metrics').textContent=d.metrics?JSON.stringify(d.metrics,null,2):'';
+ $('metadata').textContent=JSON.stringify({case_id:d.case_id,revision:s.revision,original_sha256:d.original_sha256,first_blind_label_hash:s.first_blind_label_hash,final_label_hash:s.final_label_hash,model_exposed:s.model_exposed,export_geometry_valid:s.export_geometry_valid,legacy_warnings:d.legacy_warnings},null,2);
+}
+function paintPreview(c,im,mask){c.width=im.width;c.height=im.height;const ctx=c.getContext('2d');ctx.drawImage(im,0,0);if(!mask)return;const temp=document.createElement('canvas');temp.width=c.width;temp.height=c.height;const tc=temp.getContext('2d');tc.drawImage(mask,0,0);const pix=tc.getImageData(0,0,c.width,c.height),over=ctx.getImageData(0,0,c.width,c.height);for(let i=0;i<pix.data.length;i+=4)if(pix.data[i]>0){over.data[i]=over.data[i]*.6+255*.4;over.data[i+1]=over.data[i+1]*.6+215*.4;over.data[i+2]*=.6;}ctx.putImageData(over,0,0);}
+function paintContext(im){const c=$('context');c.width=im.width;c.height=im.height;const ctx=c.getContext('2d');ctx.drawImage(im,0,0);const b=detail.context.box,r=detail.context.crop_box,sx=c.width/(b[2]-b[0]),sy=c.height/(b[3]-b[1]);ctx.strokeStyle='#ff5555';ctx.lineWidth=3;ctx.strokeRect(r[0]*sx,r[1]*sy,(r[2]-r[0])*sx,(r[3]-r[1])*sy);}
+function fit(){if(!original)return;const c=$('editor');c.width=Math.max(400,Math.round(c.clientWidth));c.height=620;scale=Math.min((c.width-30)/original.width,(c.height-30)/original.height);ox=(c.width-original.width*scale)/2;oy=(c.height-original.height*scale)/2;draw();}
+function draw(){const c=$('editor'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);if(!original)return;ctx.save();ctx.translate(ox,oy);ctx.scale(scale,scale);ctx.drawImage(original,0,0);if(visible)polygons.forEach((p,n)=>{if(!p.length)return;ctx.beginPath();ctx.moveTo(...p[0]);p.slice(1).forEach(v=>ctx.lineTo(...v));if(p.length>=3)ctx.closePath();ctx.strokeStyle=n===active?'#52ff9f':'#5ac9ff';ctx.lineWidth=2/scale;ctx.stroke();if(!detail.state.locked)for(let i=0;i<p.length;i++){ctx.beginPath();ctx.arc(...p[i],(n===active&&i===selected?6:3)/scale,0,2*Math.PI);ctx.fillStyle=ctx.strokeStyle;ctx.fill();}});ctx.restore();}
+function pixel(e){const r=$('editor').getBoundingClientRect();return [(e.clientX-r.left)*$('editor').width/r.width,(e.clientY-r.top)*$('editor').height/r.height];}
+function point(e){const p=pixel(e);return [(p[0]-ox)/scale,(p[1]-oy)/scale];}
+function nearest(p){let best=null,dist=10/scale;polygons.forEach((poly,n)=>poly.forEach((v,i)=>{const d=Math.hypot(v[0]-p[0],v[1]-p[1]);if(d<dist){best=[n,i];dist=d;}}));return best;}
+function bounded(p){return [Math.max(0,Math.min(detail.width-0.001,p[0])),Math.max(0,Math.min(detail.height-0.001,p[1]))];}
+$('editor').onpointerdown=e=>{
+ if(!original||busy)return;clearTimeout(timer);const q=pixel(e),p=point(e);$('editor').setPointerCapture(e.pointerId);
+ if(e.button===1||(e.button===0&&space)){drag={type:'pan',q,ox,oy};e.preventDefault();return;}
+ if(!editable()||e.button!==0||!visible||p[0]<0||p[1]<0||p[0]>=detail.width||p[1]>=detail.height)return;
+ pointerEditing=true;
+ const near=nearest(p);if(near){active=near[0];selected=near[1];remember();drag={type:'vertex'};controls();draw();return;}
+ remember();if(!polygons.length){polygons=[[]];active=0;}
+ const poly=polygons[active];let edge=-1,best=12/scale;
+ if(e.shiftKey&&poly.length>=2){for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],dx=b[0]-a[0],dy=b[1]-a[1],t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[1]-a[1])*dy)/(dx*dx+dy*dy||1))),d=Math.hypot(p[0]-a[0]-t*dx,p[1]-a[1]-t*dy);if(d<best){best=d;edge=i;}}}
+ if(edge>=0){poly.splice(edge+1,0,p);selected=edge+1;}else{poly.push(p);selected=poly.length-1;}changed();
+};
+$('editor').onpointermove=e=>{if(!drag)return;if(drag.type==='pan'){const q=pixel(e);ox=drag.ox+q[0]-drag.q[0];oy=drag.oy+q[1]-drag.q[1];draw();}else if(editable()){polygons[active][selected]=bounded(point(e));dirty=true;backup();draw();}};
+function endDrag(){drag=null;pointerEditing=false;if(dirty&&!busy)changed();else controls();}
+$('editor').onpointerup=endDrag;$('editor').onpointercancel=endDrag;
+$('editor').oncontextmenu=e=>{e.preventDefault();if(!editable()||!visible)return;const near=nearest(point(e));if(near){remember();polygons[near[0]].splice(near[1],1);selected=-1;changed();}};
+$('editor').addEventListener('wheel',e=>{if(!original)return;e.preventDefault();const q=pixel(e),p=point(e);scale=Math.max(.1,Math.min(80,scale*Math.exp(-e.deltaY*.001)));ox=q[0]-p[0]*scale;oy=q[1]-p[1]*scale;draw();},{passive:false});
+async function decide(number){
+ if(!editable()||drag||pointerEditing)return;if(role!=='train'&&number===1){status('Odluka 1 dostupna je samo za TRAIN; VAL/TEST zahtijeva ručni GT.',true);return;}if(localRecovery){status('Najprije odaberi što učiniti s lokalnim nacrtom.',true);return;}
+ clearTimeout(timer);const fast=fastReview();if(fast&&(number===1||number===2)){$('whole').checked=true;$('neighbour').checked=true;}
+ const p={...payload(),decision:number,fast_review:fast};backup();busy=true;controls();
+ try{await flash(`${number} · ${decisionNames[number]}`);detail=await request('/api/decision',p);dirty=false;removeBackup();setData(detail);renderInfo();await refreshCatalogue();status('Odluka spremljena'+(detail.state.locked?' i GT zaključan.':'.'));
+  if(fast||!detail.state.locked){const r=rows(),pos=r.findIndex(c=>c.index===index),next=[...r.slice(pos+1),...r.slice(0,pos)].find(c=>c.category==='PENDING');if(next){busy=false;await show(next.index);}else{busy=false;await show(index);status(`Svi slučajevi u ${role.toUpperCase()} načinu su dovršeni.`);}}
+  else{busy=false;await show(index);}
+ }catch(e){status('Odluka NIJE spremljena: '+e.message,true);}finally{hideFlash();busy=false;controls();draw();}
+}
+async function reopenLast(){
+ if(busy||drag||pointerEditing||localRecovery)return;
+ if(!await flush())return;busy=true;controls();
+ try{await refreshCatalogue();const last=catalogue.last_decision;if(!last){status('Nema spremljene odluke za vraćanje.');return;}
+  await flash(`U · ${last.source_id} / ${last.detection_id} → PENDING`);
+  await request('/api/reopen-last',{index:last.index,revision:last.revision,decision_revision:last.decision_revision});
+  await refreshCatalogue();busy=false;await show(last.index);status('Posljednja odluka vraćena je na PENDING. Izvorna odluka i povijest su sačuvane.');
+ }catch(e){status('Vraćanje NIJE spremljeno: '+e.message,true);}finally{hideFlash();busy=false;controls();draw();}
+}
+$('reopenLast').onclick=reopenLast;
+document.querySelectorAll('[data-decision]').forEach(b=>b.onclick=()=>decide(Number(b.dataset.decision)));
+$('undo').onclick=()=>{if(!editable()||!undoStack.length)return;polygons=undoStack.pop();active=Math.min(active,Math.max(0,polygons.length-1));selected=-1;changed();};
+$('hide').onclick=()=>{visible=!visible;$('hide').textContent=visible?'Sakrij konturu':'Prikaži konturu';draw();};$('fit').onclick=fit;
+$('newPolygon').onclick=()=>{if(!editable())return;remember();polygons.push([]);active=polygons.length-1;selected=-1;changed();};$('polygon').onchange=()=>{active=Number($('polygon').value);selected=-1;draw();};
+$('clear').onclick=()=>{if(!editable()||!confirm('Obrisati sve konture u ovom nacrtu?'))return;remember();polygons=[];active=0;referenceId=null;changed();};
+$('proposal').onclick=()=>{if(!editable()||role!=='train')return;remember();polygons=clone(detail.predictions.proposal);active=0;referenceId=null;changed();};
+$('reference').onclick=()=>{if(!editable()||!detail.human_reference?.usable_losslessly)return;remember();polygons=clone(detail.human_reference.polygons);active=0;referenceId=detail.human_reference.id;changed();};
+for(const id of ['notes','whole','neighbour'])$(id).oninput=changed;
+$('saveDraft').onclick=()=>{if(editable()&&!dirty){dirty=true;backup();}saveDraft();};
+$('unlock').onclick=async()=>{if(busy)return;const reason=prompt('Razlog otključavanja (sprema se trajno; nove revizije bit će model-exposed):');if(!reason)return;busy=true;controls();try{await request('/api/unlock',{index,revision:detail.state.revision,reason});busy=false;await show(index);}catch(e){status(e.message,true);}finally{busy=false;controls();}};
+$('restore').onclick=()=>{if(!editable()||!localRecovery)return;remember();polygons=clone(localRecovery.polygons);referenceId=localRecovery.reference_id;$('notes').value=localRecovery.notes;$('whole').checked=!!localRecovery.checks.whole_body;$('neighbour').checked=!!localRecovery.checks.no_unlabeled_neighbour;active=0;localRecovery=null;$('recovery').hidden=true;changed();};
+$('discardLocal').onclick=()=>{localRecovery=null;removeBackup();$('recovery').hidden=true;};
+async function step(delta){const r=rows(),pos=r.findIndex(c=>c.index===index),target=r[pos+delta];if(target)await show(target.index);}
+$('prev').onclick=()=>step(-1);$('next').onclick=()=>step(1);$('case').onchange=()=>show(Number($('case').value));
+$('role').onchange=async()=>{const chosen=$('role').value;if(!await flush()){$('role').value=role;return;}const target=catalogue.next_pending[chosen]??catalogue.cases.find(c=>c.role===chosen).index;await show(target);};
+$('pending').onclick=()=>{const i=catalogue.next_pending[role];if(i!==undefined)show(i);};
+$('history').onclick=async()=>{try{$('historyText').textContent=JSON.stringify(await request('/api/history?index='+index),null,2);}catch(e){status(e.message,true);}};
+window.onkeydown=e=>{
+ const code=e.code||e.key;if(e.repeat||heldKeys.has(code))return;heldKeys.add(code);
+ if(['TEXTAREA','INPUT','SELECT'].includes(e.target.tagName)||e.target.isContentEditable||e.ctrlKey||e.metaKey||e.altKey)return;
+ if(e.code==='Space'){space=true;e.preventDefault();return;}
+ if(busy||drag||pointerEditing)return;
+ const k=e.key.toLowerCase();
+ if(k==='b'||e.key==='ArrowLeft'){e.preventDefault();step(-1);}
+ if(k==='n'||e.key==='ArrowRight'){e.preventDefault();step(1);}
+ if(k==='u'){e.preventDefault();reopenLast();}
+ if(k==='z'){e.preventDefault();$('undo').click();}
+ if(/^[1-5]$/.test(e.key)){e.preventDefault();decide(Number(e.key));}
+ if((e.key==='Delete'||e.key==='Backspace')&&editable()&&selected>=0){e.preventDefault();remember();polygons[active].splice(selected,1);selected=-1;changed();}
+};
+window.onkeyup=e=>{heldKeys.delete(e.code||e.key);if(e.code==='Space')space=false;};window.onblur=()=>{heldKeys.clear();space=false;endDrag();};window.onbeforeunload=e=>{if(dirty){backup();e.preventDefault();e.returnValue='';}};
+(async()=>{try{catalogue=await request('/api/catalogue');const query=new URLSearchParams(location.search),requested=Number(query.get('index'));await show(query.has('index')&&catalogue.cases.some(c=>c.index===requested)?requested:(catalogue.next_pending.train??catalogue.cases.find(c=>c.role==='train').index));}catch(e){status(e.message,true);}})();
+</script></html>

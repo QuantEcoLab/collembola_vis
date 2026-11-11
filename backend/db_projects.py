@@ -3,6 +3,7 @@
 import sqlite3
 import threading
 import uuid
+from contextlib import closing
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +11,11 @@ from backend.config import settings
 
 _DB_PATH = settings.data_dir / "community.db"
 _lock = threading.Lock()
+PROJECT_LIST_TIMEOUT_SECONDS = 2.0
+
+
+class ProjectsDatabaseBusy(RuntimeError):
+    """The project list must fail in bounded time instead of holding a request forever."""
 
 
 def _connect() -> sqlite3.Connection:
@@ -79,8 +85,14 @@ def create_project(name: str, description: str, username: str) -> str:
 
 def list_projects() -> list[dict[str, Any]]:
     """Return all projects with image_count and thumbnail_image_id."""
-    with _lock, _connect() as conn:
-        rows = conn.execute("""
+    if not _lock.acquire(timeout=PROJECT_LIST_TIMEOUT_SECONDS):
+        raise ProjectsDatabaseBusy("Baza projekata je trenutačno zauzeta. Pokušajte ponovno.")
+    try:
+        # Read-only and explicitly closed; this route must never create/reset a database.
+        with closing(sqlite3.connect(_DB_PATH.resolve().as_uri() + "?mode=ro", uri=True,
+                                     timeout=PROJECT_LIST_TIMEOUT_SECONDS)) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("""
             SELECT
                 p.id, p.name, p.description, p.created_by, p.created_at, p.updated_at,
                 COUNT(pi.id) AS image_count,
@@ -89,7 +101,13 @@ def list_projects() -> list[dict[str, Any]]:
             LEFT JOIN project_images pi ON pi.project_id = p.id
             GROUP BY p.id
             ORDER BY p.updated_at DESC
-        """).fetchall()
+            """).fetchall()
+    except sqlite3.OperationalError as exc:
+        if "locked" in str(exc).lower() or "busy" in str(exc).lower():
+            raise ProjectsDatabaseBusy("Baza projekata je zaključana drugim zahtjevom. Pokušajte ponovno.") from exc
+        raise
+    finally:
+        _lock.release()
     return [dict(r) for r in rows]
 
 

@@ -50,7 +50,7 @@ export default function BboxOverlay({
     const rect = svg.getBoundingClientRect()
     const x = ((e.clientX - rect.left) / rect.width) * imageWidth
     const y = ((e.clientY - rect.top) / rect.height) * imageHeight
-    return { x, y }
+    return { x: Math.max(0, Math.min(imageWidth, x)), y: Math.max(0, Math.min(imageHeight, y)) }
   }
 
   const handleMouseDown = (e: React.MouseEvent) => {

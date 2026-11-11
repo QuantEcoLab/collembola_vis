@@ -1,0 +1,128 @@
+{
+  "imgsz": 320,
+  "resize_assumption": "Ultralytics letterbox scale: scale=min(imgsz/image_width, imgsz/image_height); padding ignored for object size.",
+  "groups": [
+    {
+      "group": "v5_train_original",
+      "images": 1831,
+      "polygons": 1831,
+      "image_width": {
+        "min": 18.0,
+        "p10": 46.0,
+        "median": 83.0,
+        "p90": 163.0,
+        "max": 363.0
+      },
+      "image_height": {
+        "min": 21.0,
+        "p10": 58.0,
+        "median": 119.0,
+        "p90": 198.0,
+        "max": 315.0
+      },
+      "polygons_per_image": {
+        "min": 1.0,
+        "p10": 1.0,
+        "median": 1.0,
+        "p90": 1.0,
+        "max": 1.0
+      },
+      "norm_bbox_width": {
+        "min": 0.31579,
+        "p10": 0.666667,
+        "median": 0.90566,
+        "p90": 0.9893620000000001,
+        "max": 0.996094
+      },
+      "norm_bbox_height": {
+        "min": 0.42307700000000004,
+        "p10": 0.76,
+        "median": 0.9425279999999999,
+        "p90": 0.993506,
+        "max": 0.996825
+      },
+      "norm_bbox_area": {
+        "min": 0.25017136432,
+        "p10": 0.500297609006,
+        "median": 0.861434,
+        "p90": 0.9527794118499999,
+        "max": 0.988365920635
+      },
+      "resized_bbox_width_px_at_320_letterbox": {
+        "min": 42.83465574803149,
+        "p10": 85.89470315789474,
+        "median": 200.19700019704433,
+        "p90": 316.44448,
+        "max": 318.75008
+      },
+      "resized_bbox_height_px_at_320_letterbox": {
+        "min": 64.56140350877193,
+        "p10": 153.04346086956522,
+        "median": 282.22208,
+        "p90": 317.90848,
+        "max": 318.984
+      }
+    },
+    {
+      "group": "v7_added_instance_centered_ruler_crops",
+      "images": 83,
+      "polygons": 87,
+      "image_width": {
+        "min": 19.0,
+        "p10": 47.0,
+        "median": 117.0,
+        "p90": 197.99999999999997,
+        "max": 308.0
+      },
+      "image_height": {
+        "min": 33.0,
+        "p10": 65.2,
+        "median": 130.0,
+        "p90": 221.0,
+        "max": 311.0
+      },
+      "polygons_per_image": {
+        "min": 1.0,
+        "p10": 1.0,
+        "median": 1.0,
+        "p90": 1.0,
+        "max": 2.0
+      },
+      "norm_bbox_width": {
+        "min": 0.27840699999999996,
+        "p10": 0.7421358,
+        "median": 0.7499960000000001,
+        "p90": 0.7543717999999999,
+        "max": 0.834966
+      },
+      "norm_bbox_height": {
+        "min": 0.18406399999999995,
+        "p10": 0.7438146000000001,
+        "median": 0.749807,
+        "p90": 0.7536284,
+        "max": 0.757663
+      },
+      "norm_bbox_area": {
+        "min": 0.054120371950999974,
+        "p10": 0.5536477673898,
+        "median": 0.5623585935000001,
+        "p90": 0.566633439756,
+        "max": 0.5854861149189999
+      },
+      "resized_bbox_width_px_at_320_letterbox": {
+        "min": 44.37952475836431,
+        "p10": 80.00048064246302,
+        "median": 172.12872205128204,
+        "p90": 240.45024,
+        "max": 241.19552
+      },
+      "resized_bbox_height_px_at_320_letterbox": {
+        "min": 48.11783225806451,
+        "p10": 84.08444990877192,
+        "median": 239.4048,
+        "p90": 240.563584,
+        "max": 242.08928
+      }
+    }
+  ]
+}

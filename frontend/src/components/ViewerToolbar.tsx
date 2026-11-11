@@ -26,7 +26,7 @@ export function ViewerToolbar({
   const overlayOptions: { value: OverlayMode; label: string; disabled: boolean }[] = [
     { value: 'raw', label: 'Raw Image', disabled: false },
     { value: 'boxes', label: 'Detection Boxes', disabled: !availableOverlays.boxes },
-    { value: 'contours', label: 'SAM Contours', disabled: !availableOverlays.contours },
+    { value: 'contours', label: 'Contours', disabled: !availableOverlays.contours },
     { value: 'both', label: 'Boxes + Contours', disabled: !availableOverlays.boxes || !availableOverlays.contours },
   ];
 

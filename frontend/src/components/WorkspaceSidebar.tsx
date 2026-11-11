@@ -1,6 +1,10 @@
 import { Settings2, RefreshCw, Table2, CheckCircle2, ImagePlus, Ruler, X } from 'lucide-react'
 import JobProgress from './JobProgress'
 import type { Job } from '../api/types'
+import type { VolumeSummary as Summary } from '../api/types'
+import ExperimentalContourAction from './ExperimentalContourAction'
+import VolumeSummary from './VolumeSummary'
+import type { ReactNode } from 'react'
 
 const CALIBRATION_PRESETS = [
   { label: '8.57 μm/px (default)', value: 8.57 },
@@ -40,14 +44,20 @@ interface Props {
   measurementDone: boolean
   measureJob: Job | null
   measureError: string | null
-  measureMethod: 'fast' | 'sam'
-  setMeasureMethod: (m: 'fast' | 'sam') => void
   onRunMeasurement: () => void
   csvDataLength: number
   onViewResults: () => void
 
   // Reset
   onReset: () => void
+  contourBusy: boolean
+  contourJob: Job | null
+  contourError: string | null
+  contourCalibration: number | null
+  onRunContours: () => void
+  volumeSummary: Summary | null
+  contourCount: number
+  detectorDatasetAction?: ReactNode
 }
 
 export function WorkspaceSidebar({
@@ -73,12 +83,12 @@ export function WorkspaceSidebar({
   measurementDone,
   measureJob,
   measureError,
-  measureMethod,
-  setMeasureMethod,
   onRunMeasurement,
   csvDataLength,
   onViewResults,
   onReset,
+  contourBusy, contourJob, contourError, contourCalibration, onRunContours, volumeSummary, contourCount,
+  detectorDatasetAction,
 }: Props) {
   const statusDots = [
     { label: 'Calibrated', done: calibrated },
@@ -124,9 +134,10 @@ export function WorkspaceSidebar({
 
         {/* ── Scale ───────────────────────────────────────────── */}
         <div className="px-4 py-4 border-b">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scale</p>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scale (µm/px)</p>
           <input
             type="number"
+            aria-label="Kalibracija (µm/px)"
             value={umPerPixel}
             onChange={(e) => setUmPerPixel(parseFloat(e.target.value))}
             className="w-full px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -180,7 +191,7 @@ export function WorkspaceSidebar({
 
           <button
             onClick={onRunDetection}
-            disabled={detectionJob?.status === 'running'}
+            disabled={contourBusy || detectionJob?.status === 'running'}
             className={`w-full px-4 py-2 rounded-lg font-medium transition-colors text-sm disabled:bg-gray-300 disabled:cursor-not-allowed ${
               detectionDone
                 ? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
@@ -210,38 +221,11 @@ export function WorkspaceSidebar({
           <div className="px-4 py-4 space-y-2">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Measurement</p>
 
-            <div className="space-y-1.5">
-              <label className="flex items-center gap-2 p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="radio"
-                  value="fast"
-                  checked={measureMethod === 'fast'}
-                  onChange={() => setMeasureMethod('fast')}
-                  className="text-blue-600"
-                />
-                <div>
-                  <div className="text-xs font-medium text-gray-900">Fast Ellipse</div>
-                  <div className="text-[10px] text-gray-500">~178 org/sec, recommended</div>
-                </div>
-              </label>
-              <label className="flex items-center gap-2 p-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50">
-                <input
-                  type="radio"
-                  value="sam"
-                  checked={measureMethod === 'sam'}
-                  onChange={() => setMeasureMethod('sam')}
-                  className="text-blue-600"
-                />
-                <div>
-                  <div className="text-xs font-medium text-gray-900">SAM Contours</div>
-                  <div className="text-[10px] text-gray-500">~1 org/sec, more accurate</div>
-                </div>
-              </label>
-            </div>
+            <p className="text-xs text-teal-800">Zakrivljena središnja linija · lokalni okomiti presjeci · volumen Σ π(wᵢ/2)²Δlᵢ</p>
 
             <button
               onClick={onRunMeasurement}
-              disabled={measureJob?.status === 'running'}
+              disabled={contourBusy || measureJob?.status === 'running'}
               className={`w-full px-4 py-2 rounded-lg font-medium transition-colors text-sm disabled:bg-gray-300 disabled:cursor-not-allowed ${
                 measurementDone
                   ? 'border border-gray-300 text-gray-700 hover:bg-gray-50'
@@ -251,8 +235,8 @@ export function WorkspaceSidebar({
               {measureJob?.status === 'running'
                 ? 'Running…'
                 : measurementDone
-                ? 'Re-run Measurement'
-                : 'Run Measurement'}
+                 ? 'Ponovi mjerenje'
+                 : 'Izmjeri duljinu i volumen'}
             </button>
 
             {measureJob && !measurementDone && <JobProgress job={measureJob} />}
@@ -281,6 +265,8 @@ export function WorkspaceSidebar({
             {measureError && <p className="text-xs text-red-600">{measureError}</p>}
           </div>
         )}
+        {detectorDatasetAction}
+        {volumeSummary && <div className="px-4 pb-4"><VolumeSummary summary={volumeSummary} count={contourCount} calibration={contourCalibration} /></div>}
       </div>
 
       {/* Reset at bottom */}
@@ -293,6 +279,8 @@ export function WorkspaceSidebar({
           Reset Workspace
         </button>
       </div>
+      <ExperimentalContourAction busy={contourBusy} job={contourJob} error={contourError}
+        calibration={contourCalibration} onRun={onRunContours} />
     </div>
   )
 }

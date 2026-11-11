@@ -19,6 +19,7 @@ interface UseRefinementResult {
   toggleBox: (id: string) => void
   removeBox: (id: string) => void
   loadBoxes: (boxes: AnnotatedBox[]) => void
+  updateBox: (id: string, coords: DrawingBox) => void
   selectedId: string | null
   selectBox: (id: string | null) => void
   drawingBox: DrawingBox | null
@@ -104,6 +105,7 @@ export function useRefinement(
   }, [detectionJobId, detectionDone, imageId])
 
   const toggleBox = useCallback((id: string) => {
+    setAnnotationsSaved(false)
     setBoxes((prev) =>
       prev.map((b) =>
         b.id === id
@@ -128,6 +130,11 @@ export function useRefinement(
     setAnnotationsSaved(false)
   }, [])
 
+  const updateBox = useCallback((id: string, coords: DrawingBox) => {
+    setBoxes(prev => prev.map(box => box.id === id ? { ...box, ...coords } : box))
+    setAnnotationsSaved(false)
+  }, [])
+
   const startDraw = useCallback((x: number, y: number) => {
     setDrawStart({ x, y })
     setDrawingBox({ x1: x, y1: y, x2: x, y2: y })
@@ -148,7 +155,7 @@ export function useRefinement(
     // Ignore tiny accidental drags
     if (x2 - x1 < MIN_BOX_PX || y2 - y1 < MIN_BOX_PX) return
     const newBox: AnnotatedBox = {
-      id: `added-${Date.now()}`,
+      id: `added-${crypto.randomUUID()}`,
       x1, y1, x2, y2,
       conf: 1.0,
       status: 'added',
@@ -185,6 +192,7 @@ export function useRefinement(
     toggleBox,
     removeBox,
     loadBoxes,
+    updateBox,
     selectedId,
     selectBox,
     drawingBox,

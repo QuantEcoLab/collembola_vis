@@ -135,7 +135,7 @@ class JobManager:
                 message=data.get("message", ""),
                 result=data.get("result") or {},
                 error=data.get("error"),
-                params={},
+                params=data.get("params") or {},
                 created_at=datetime.fromisoformat(data["created_at"]),
                 started_at=datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
                 completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
@@ -152,7 +152,7 @@ class JobManager:
             from backend.config import settings
             out_dir = settings.outputs_dir / job.id
             out_dir.mkdir(parents=True, exist_ok=True)
-            (out_dir / "result.json").write_text(json.dumps(job.to_dict()))
+            (out_dir / "result.json").write_text(json.dumps({**job.to_dict(), "params": job.params}))
         except Exception:
             pass
 

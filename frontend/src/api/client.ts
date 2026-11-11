@@ -2,6 +2,7 @@ import type {
   AnnotatedBox,
   AnnotationFile,
   CalibrationResult,
+  ContourRequest,
   DetectionRequest,
   ImageInfo,
   Job,
@@ -9,6 +10,8 @@ import type {
   ModelInfo,
   Project,
   ProjectDetail,
+  DetectorDatasetIndex,
+  DetectorDatasetVersion,
 } from './types'
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')  // Use Vite's BASE_URL, remove trailing slash
@@ -35,17 +38,58 @@ function handle401(): never {
   throw new Error('Unauthorized')
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    ...options,
-  })
-  if (!res.ok) {
-    if (res.status === 401) handle401()
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || res.statusText)
+async function request<T>(path: string, options?: RequestInit, timeoutMs?: number): Promise<T> {
+  const controller = timeoutMs ? new AbortController() : null
+  const upstream = options?.signal
+  const abort = () => controller?.abort()
+  upstream?.addEventListener('abort', abort, { once: true })
+  if (upstream?.aborted) abort()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const perform = async (): Promise<T> => {
+    const res = await fetch(`${BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      ...options,
+      signal: controller?.signal ?? upstream,
+    })
+    if (!res.ok) {
+      if (res.status === 401) handle401()
+      const err = await res.json().catch(() => ({ detail: res.statusText }))
+      const detail = Array.isArray(err.detail) ? err.detail.map((item: { msg?: string }) => item.msg ?? '').join('; ') : err.detail
+      throw new Error(`${detail || res.statusText} (HTTP ${res.status}, ${path})`)
+    }
+    if (timeoutMs && !res.headers.get('content-type')?.includes('application/json')) {
+      throw new Error(`${path} vratio je HTTP ${res.status}, ali ne JSON. Provjerite backend/API putanju.`)
+    }
+    // The deadline includes reading/parsing the body, not just receiving response headers.
+    return await res.json()
   }
-  return res.json()
+  try {
+    if (!timeoutMs) return await perform()
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Zahtjev ${path} nije dovršen unutar ${timeoutMs / 1000} s. Provjerite vezu s poslužiteljem i pokušajte ponovno.`))
+        controller?.abort()
+      }, timeoutMs)
+    })
+    return await Promise.race([perform(), deadline])
+  } finally {
+    if (timer) clearTimeout(timer)
+    upstream?.removeEventListener('abort', abort)
+  }
+}
+
+// Images
+export const getContourSource = (imageId: string) =>
+  request<{ job_id: string | null; measurement_method: string | null }>(`/api/contours/source/${imageId}`, { cache: 'no-store' }, 10_000)
+
+export async function getContourOverview(jobId: string, signal?: AbortSignal): Promise<Blob> {
+  const response = await fetch(`${BASE}/api/contours/overview/${jobId}`, { headers: authHeaders(), cache: 'no-store', signal })
+  if (response.status === 401) handle401()
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || `Prikaz kontura nije dostupan (HTTP ${response.status}).`)
+  }
+  return response.blob()
 }
 
 // Images
@@ -142,6 +186,13 @@ export const runMeasurement = (req: MeasurementRequest) =>
 export const getMeasurementResult = (jobId: string) =>
   request<Job>(`/api/measurement/result/${jobId}`)
 
+// Experimental fixed checkpoint; the server accepts no inference parameter overrides.
+export const runContours = (req: ContourRequest) =>
+  request<{ job_id: string; status: string; model_name: string }>('/api/contours/run', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  })
+
 // Jobs
 export const listJobs = () => request<Job[]>('/api/jobs')
 export const getJob = (id: string) => request<Job>(`/api/jobs/${id}`)
@@ -211,7 +262,8 @@ export const runFinetuneAll = (req: FinetuneAllRequest) =>
   })
 
 // Projects
-export const listProjects = () => request<Project[]>('/api/projects')
+export const listProjects = (signal?: AbortSignal) =>
+  request<Project[]>('/api/projects', { signal, cache: 'no-store' }, 10_000)
 
 export const getProject = (id: string) => request<ProjectDetail>(`/api/projects/${id}`)
 
@@ -319,4 +371,16 @@ export async function downloadProjectResults(projectId: string, projectName: str
   a.click()
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
+}
+
+export const saveDetectorDataset = (payload: { image_id: string; source_job_id: string | null; source_description: string; boxes: AnnotatedBox[] }) =>
+  request<{ version_id: string; entry_id: string; revision: number; unchanged: boolean }>('/api/detector-dataset/save', { method: 'POST', body: JSON.stringify(payload) }, 180_000)
+export const listDetectorDataset = () => request<DetectorDatasetIndex>('/api/detector-dataset', { cache: 'no-store' }, 10_000)
+export const getDetectorDatasetVersion = (id: string) => request<DetectorDatasetVersion>(`/api/detector-dataset/versions/${id}`, { cache: 'no-store' }, 10_000)
+export async function detectorDatasetBlob(version: string, entry?: string, signal?: AbortSignal): Promise<Blob> {
+  const path = `/api/detector-dataset/versions/${version}/${entry ? `images/${entry}` : 'export'}`
+  const response = await fetch(BASE + path, { headers: authHeaders(), cache: 'no-store', signal })
+  if (response.status === 401) handle401()
+  if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.detail || `HTTP ${response.status}`) }
+  return response.blob()
 }

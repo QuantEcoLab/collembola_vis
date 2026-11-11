@@ -1,0 +1,81 @@
+{
+  "all_ruler_source_ids": [
+    "C_2_1_Collembola007",
+    "C_4_3_PS_500034",
+    "K_3_Collembola003"
+  ],
+  "v7_train_ruler_source_ids": [
+    "C_2_1_Collembola007",
+    "C_4_3_PS_500034",
+    "K_3_Collembola003"
+  ],
+  "heldout_ruler_source_ids_without_leakage": [],
+  "source_level_leakage_free_heldout_available": false,
+  "all_ruler_sources": {
+    "C_2_1_Collembola007": {
+      "ruler_scenes": [
+        "C_2_1_Collembola007_ruler_0_25__x3500_y1400_w3400_h2500__selection_20260918_192858.png",
+        "C_2_1_Collembola007_ruler_25_50__x6200_y1350_w3450_h2550__selection_20261010_154525.png"
+      ],
+      "polygons": 72
+    },
+    "C_4_3_PS_500034": {
+      "ruler_scenes": [
+        "C_4_3_PS_500034_ruler_0_20__x3820_y760_w2680_h2540__selection_20261010_154321.png",
+        "C_4_3_PS_500034_ruler_20_40__x6100_y760_w3050_h2540__selection_20261010_154357.png"
+      ],
+      "polygons": 12
+    },
+    "K_3_Collembola003": {
+      "ruler_scenes": [
+        "K_3_Collembola003_ruler_0_20__x3850_y1500_w2800_h2400__selection_20261010_154429.png",
+        "K_3_Collembola003_ruler_20_45__x6100_y1450_w3200_h2450__selection_20261010_154456.png"
+      ],
+      "polygons": 45
+    }
+  },
+  "v7_train_sources": {
+    "C_2_1_Collembola007": {
+      "source_images": [
+        "C_2_1_Collembola007_ruler_0_25__x3500_y1400_w3400_h2500__selection_20260918_192858.png",
+        "C_2_1_Collembola007_ruler_25_50__x6200_y1350_w3450_h2550__selection_20261010_154525.png"
+      ],
+      "accepted_crops": 43,
+      "polygons_in_labels": 44
+    },
+    "C_4_3_PS_500034": {
+      "source_images": [
+        "C_4_3_PS_500034_ruler_0_20__x3820_y760_w2680_h2540__selection_20261010_154321.png",
+        "C_4_3_PS_500034_ruler_20_40__x6100_y760_w3050_h2540__selection_20261010_154357.png"
+      ],
+      "accepted_crops": 11,
+      "polygons_in_labels": 12
+    },
+    "K_3_Collembola003": {
+      "source_images": [
+        "K_3_Collembola003_ruler_0_20__x3850_y1500_w2800_h2400__selection_20261010_154429.png",
+        "K_3_Collembola003_ruler_20_45__x6100_y1450_w3200_h2450__selection_20261010_154456.png"
+      ],
+      "accepted_crops": 29,
+      "polygons_in_labels": 31
+    }
+  },
+  "checkpoint_hashes": [
+    {
+      "path": "runs/segment/runs/segment/trunk_seg_v7_ruler_finetune/weights/best.pt",
+      "sha256": "a46e37b85efe2794d1c5d72cabbbb6ef0aab5d5c72cd22d9264faeea46098883",
+      "size_bytes": 5947556
+    },
+    {
+      "path": "runs/segment/runs/segment/trunk_seg_v7_ruler_finetune/weights/last.pt",
+      "sha256": "e68d1246579cbc4dbc81c378eb2cbaf38ea06e7ab70c0cb6de26d5f9c592c231",
+      "size_bytes": 5947556
+    },
+    {
+      "path": "runs/segment/runs/segment/trunk_seg_v7_ruler_finetune/weights/epoch9.pt",
+      "sha256": "c8136b7518c65e050f967a362e85ca9326ee50ed1964a196cdffbc29886659c0",
+      "size_bytes": 23271676
+    }
+  ],
+  "conclusion": "No source-level held-out ruler scenes exist among the six manually annotated ruler scenes; all source IDs contributed accepted v7 training crops."
+}

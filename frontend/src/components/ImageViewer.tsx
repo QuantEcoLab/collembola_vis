@@ -11,6 +11,7 @@ interface Props {
   transformOverlay?: ReactNode
   /** When true, panning is disabled (e.g. while drawing boxes). */
   disablePan?: boolean
+  focusBox?: { x1: number; y1: number; x2: number; y2: number } | null
 }
 
 interface Transform { scale: number; x: number; y: number }
@@ -27,6 +28,7 @@ export default function ImageViewer({
   overlay,
   transformOverlay,
   disablePan,
+  focusBox,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const innerRef    = useRef<HTMLDivElement>(null)
@@ -45,6 +47,14 @@ export default function ImageViewer({
         `translate(${next.x}px, ${next.y}px) scale(${next.scale})`
     }
   }, [])
+
+  useEffect(() => {
+    if (!loaded || !focusBox || !containerRef.current) return
+    const { width, height } = containerRef.current.getBoundingClientRect()
+    const margin = 50 // View-only context; does not change model crops or padding.
+    const scale = Math.min(MAX_SCALE, width / (focusBox.x2 - focusBox.x1 + margin * 2), height / (focusBox.y2 - focusBox.y1 + margin * 2))
+    applyTransform({ scale, x: width / 2 - (focusBox.x1 + focusBox.x2) / 2 * scale, y: height / 2 - (focusBox.y1 + focusBox.y2) / 2 * scale })
+  }, [loaded, focusBox, applyTransform])
 
   // ── Fit image inside container ──────────────────────────────────────────────
   const fitToContainer = useCallback(() => {

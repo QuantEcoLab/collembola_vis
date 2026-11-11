@@ -19,9 +19,9 @@ router = APIRouter(prefix="/api/measurement", tags=["measurement"], dependencies
 
 class MeasurementRequest(BaseModel):
     image_id: str
-    detections_csv: str
-    um_per_pixel: float
-    method: str = "fast"
+    detections_csv: str = ""
+    um_per_pixel: float | None = None
+    method: str = "centerline_circular_sections_v2"
     device: str | None = None
     use_annotations: bool = False
 
@@ -60,23 +60,34 @@ async def run_measurement(req: MeasurementRequest):
     if info is None:
         raise HTTPException(404, "Image not found")
 
-    if req.use_annotations:
-        try:
-            detections_csv = str(_annotations_to_csv(req.image_id))
-        except FileNotFoundError as e:
-            raise HTTPException(404, str(e))
-    else:
+    from backend.services.contours import valid_calibration, validate_checkpoint, annotation_snapshot
+    try:
+        valid_calibration(req.um_per_pixel)
+        validate_checkpoint()
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    detections_csv = None
+    if not req.use_annotations and req.detections_csv:
         csv_path = Path(req.detections_csv).resolve()
         if not csv_path.is_relative_to(settings.outputs_dir.resolve()):
             raise HTTPException(400, "Invalid detections path")
         detections_csv = req.detections_csv
 
     params = {
-        "image_path": info["path"],
-        "detections_csv": detections_csv,
+        "image_id": req.image_id, "image_path": info["path"],
         "um_per_pixel": req.um_per_pixel,
-        "method": req.method,
+        "use_annotations": req.use_annotations,
+        "method": "centerline_circular_sections_v2",
     }
+    if detections_csv:
+        params["detections_csv"] = detections_csv
+    if req.use_annotations:
+        snapshot, digest = annotation_snapshot(req.image_id)
+        if snapshot is None:
+            raise HTTPException(400, "Najprije spremite ručne oznake")
+        params.update(annotation_snapshot=snapshot, annotations_sha256=digest)
     if req.device:
         params["device"] = req.device
 

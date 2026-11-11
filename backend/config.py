@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     calibration_dir: Path = Path("data/calibration")
     annotations_dir: Path = Path("data/annotations")
     models_dir: Path = Path("models")
+    detector_dataset_dir: Path = Path("data/curated_detector")
+    detector_split_registry: Path = Path("data/detector_split_registry.json")
 
     # Model defaults
     default_model: Path = Path("models/yolo11n_tiled_best.pt")
@@ -21,6 +23,11 @@ class Settings(BaseSettings):
     default_iou: float = 0.5
     default_tile_size: int = 1280
     default_overlap: int = 256
+
+    # Experimental contour workflow; production detector/model defaults above stay intact.
+    exp03_checkpoint: Path = Path(
+        "outputs/ruler_v7_reviewed367_ft_exp03_no_os/evaluation/fixed_candidate/best.pt"
+    )
 
     # Image handling
     thumbnail_max_side: int = 2048

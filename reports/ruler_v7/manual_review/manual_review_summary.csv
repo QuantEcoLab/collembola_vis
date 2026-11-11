@@ -1,0 +1,7 @@
+scope,source_id,priority_cases,R,N,X,U,position_pending,ruler_individuals,V5_BETTER,V7_BETTER,EQUAL,BOTH_BAD,UNASSESSABLE,rating_pending,both_masks,v5_only_mask,v7_only_mask,one_model_mask,neither_mask
+overall,ALL,130,93,3,9,25,0,93,2,34,0,57,0,0,75,6,12,18,0
+source,C_1_2_Collembola005,39,26,1,5,7,0,26,0,9,0,17,0,0,23,0,3,3,0
+source,C_1_3_Collembola006,61,43,1,4,13,0,43,0,15,0,28,0,0,32,4,7,11,0
+source,C_3_2_Collembola011,15,12,1,0,2,0,12,2,4,0,6,0,0,10,2,0,2,0
+source,C_4_1_PS_500-1000_014,8,7,0,0,1,0,7,0,4,0,3,0,0,6,0,1,1,0
+source,C_5_1_PS_500-1000_017,7,5,0,0,2,0,5,0,2,0,3,0,0,4,0,1,1,0

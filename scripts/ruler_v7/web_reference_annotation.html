@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="hr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Neovisne ručne konture ruler jedinki</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#111923;color:#eef3f9;font:16px system-ui}header{position:sticky;top:0;background:#203044;padding:12px 18px;z-index:2}h1{font-size:21px;margin:0 0 8px}button,select{font:inherit;color:white;background:#304661;border:1px solid #8599ae;border-radius:5px;padding:8px;margin:3px;cursor:pointer}button:disabled{opacity:.4}main{padding:12px 18px;max-width:1900px;margin:auto}.grid{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}section{background:#1b2938;padding:12px;border-radius:8px;margin-bottom:12px}#editor{width:100%;height:660px;background:#071019;touch-action:none;cursor:crosshair}.context{width:100%;height:570px;object-fit:contain;background:#071019}.muted{color:#b7c8d9}#status{color:#8aefb7;min-height:26px}#status.error{color:#ffad9b}.references{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.references img{width:100%;height:350px;object-fit:contain;background:#080e15}textarea{width:100%;font:inherit;background:#0f1c2c;color:white}h2{font-size:18px}pre{white-space:pre-wrap} @media(max-width:1000px){.grid{grid-template-columns:1fr}}
+</style>
+<header><h1>Neovisna ručna referentna kontura ciljne jedinke</h1><button id="prev">←</button><select id="case"></select><button id="next">→</button><button id="pending">Prva neoznačena</button><span id="progress"></span><div id="status">Učitavanje…</div></header>
+<main><h2 id="identity"></h2><p>Ocrtaj samo <strong>ciljni trup</strong> klase <code>trunk</code>. Crveni okvir u kontekstu pokazuje izvorni raw crop; cijan okvir pokazuje područje za ocrtavanje. <span id="imageHelp">Crtaj neovisno od modelskih referenci.</span> Ostale vidljive jedinke ne označavaj u ovom pojedinačnom zadatku.</p>
+<div class="grid"><section><h2 id="imageTitle">Čista slika — crtaj od nule</h2><canvas id="editor"></canvas>
+<p class="muted">Lijevi klik: dodaj vrh. Enter: zatvori poligon. Z/desni klik: poništi zadnji vrh. Zatvoreni poligon: povuci vrh za ispravak. Kotačić: zoom; srednja tipka ili Space+povlačenje: pomak.</p>
+<button id="close">Zatvori (Enter)</button><button id="undo">Poništi vrh (Z)</button><button id="reset">Prilagodi pogled</button><button id="guide">Sakrij okvir cilja</button><button id="clear">Obriši nacrtani poligon</button><p id="points"></p>
+<label>Bilješka:<textarea id="notes" rows="2" placeholder="Nejasan rub, dodir s drugom jedinkom…"></textarea></label><button id="save">Spremi ručnu konturu i nastavi (S)</button>
+</section><section><h2>Širi kontekst — bez modelskih kontura</h2><canvas class="context" id="context"></canvas><p class="muted">Crveno = izvorni raw crop. Cijan = prošireni isječak za ručno ocrtavanje.</p><details><summary>Metapodaci</summary><pre id="meta"></pre></details></section></div>
+<section><details id="referenceDetails"><summary>Uključi/isključi odvojene V5/V7 reference — nisu početna oznaka</summary><p>Reference pripadaju izvornom raw cropu. Ne prenose se na platno za crtanje i ne mogu se uvesti kao ručni poligon.</p><label>Prikaz referenci: <select id="referenceMode"><option value="contour">Kontura na originalnom cropu</option><option value="mask">Binarna maska</option></select></label><div class="references"><div>Izvorni raw crop<img id="raw" alt="Originalni raw crop"></div><div>V5 referenca<canvas class="reference" id="ref5" style="width:100%;height:350px;object-fit:contain"></canvas></div><div>V7 referenca<canvas class="reference" id="ref7" style="width:100%;height:350px;object-fit:contain"></canvas></div></div></details></section>
+<p class="muted">Spremanje stvara novi LabelMe JSON i povijesnu reviziju samo u ovom referentnom paketu. Oznake se ne dodaju u dataset. Prijedlog source-level podjele nije primijenjen.</p></main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);let data,index=0,points=[],closed=false,dirty=false,busy=false,original,scale=1,ox=0,oy=0,drag=null,space=false,guide=true,serial=0,references=null;
+async function request(url,options){const r=await fetch(url,options),d=await r.json();if(!r.ok)throw Error(d.error||r.status);return d;}
+function status(text,error=false){$('status').textContent=text;$('status').className=error?'error':'';}
+function image(url){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=()=>reject(Error('Slika nije dostupna'));im.src=url;});}
+function pixel(event){const r=$('editor').getBoundingClientRect();return [(event.clientX-r.left)*$('editor').width/r.width,(event.clientY-r.top)*$('editor').height/r.height];}
+function point(event){const p=pixel(event);return [(p[0]-ox)/scale,(p[1]-oy)/scale];}
+function fit(){if(!original)return;const c=$('editor');c.width=Math.max(400,Math.round(c.clientWidth));c.height=660;scale=Math.min((c.width-30)/original.width,(c.height-30)/original.height);ox=(c.width-original.width*scale)/2;oy=(c.height-original.height*scale)/2;draw();}
+function draw(){
+ const c=$('editor'),ctx=c.getContext('2d');$('notes').disabled=busy;for(const id of ['case','prev','next','pending'])$(id).disabled=busy;$('save').disabled=busy||!original||!closed||points.length<3;ctx.clearRect(0,0,c.width,c.height);if(!original)return;
+ ctx.save();ctx.translate(ox,oy);ctx.scale(scale,scale);ctx.drawImage(original,0,0);
+ if(guide){const row=data.cases[index],a=row.annotation_box_source_xyxy,r=row.original_crop_box_source_xyxy;ctx.strokeStyle='#ff6666';ctx.lineWidth=1.3/scale;ctx.setLineDash([6/scale,4/scale]);ctx.strokeRect(r[0]-a[0],r[1]-a[1],r[2]-r[0],r[3]-r[1]);ctx.setLineDash([]);}
+ if(points.length){ctx.beginPath();ctx.moveTo(...points[0]);for(const p of points.slice(1))ctx.lineTo(...p);if(closed)ctx.closePath();ctx.strokeStyle='#53ff9d';ctx.lineWidth=2/scale;ctx.stroke();for(const p of points){ctx.beginPath();ctx.arc(...p,4/scale,0,2*Math.PI);ctx.fillStyle='#53ff9d';ctx.fill();}}
+  ctx.restore();$('points').textContent=`${points.length} vrhova · ${closed?'zatvoren':'otvoren'} poligon${dirty?' · nespremljene promjene':''}`;$('save').disabled=busy||!closed||points.length<3;
+}
+function changed(){dirty=true;draw();}
+function updateProgress(){const n=data.annotations.filter(Boolean).length;$('progress').textContent=`Spremljeno ${n}/${data.cases.length}`;for(let i=0;i<data.cases.length;i++)$('case').options[i].textContent=`${data.annotations[i]?'✓':'○'} ${i+1}. ${data.cases[i].source_id} / ${data.cases[i].detection_id}`;}
+async function show(i){
+ if(busy)return;if(dirty&&!confirm('Odbaciti nespremljene promjene ovog poligona?')){$('case').value=index;return;}
+  index=i;const token=++serial;original=null;points=[];closed=false;dirty=false;drag=null;references=null;$('case').value=index;$('referenceDetails').open=false;
+  const row=data.cases[index],saved=data.annotations[index];$('identity').textContent=`${index+1}/${data.cases.length} · ${row.source_id} · detection ID ${row.detection_id}`;$('meta').textContent=JSON.stringify({annotation_box:row.annotation_box_source_xyxy,raw_box:row.original_crop_box_source_xyxy,original_dimensions:row.original_dimensions||null,proposal_only:row.proposed_source_role},null,2);
+ $('notes').value=saved?.shapes[0].description||'';if(saved){points=saved.shapes[0].points.map(p=>[...p]);closed=true;}
+  $('raw').removeAttribute('src');for(const id of ['ref5','ref7'])$(id).getContext('2d').clearRect(0,0,$(id).width,$(id).height);draw();status('Učitavanje čiste slike i konteksta…');
+ try{const [clean,context]=await Promise.all([image(`/asset?index=${i}&kind=image`),image(`/asset?index=${i}&kind=context`)]);if(token!==serial)return;
+  original=clean;fit();const c=$('context');c.width=context.width;c.height=context.height;const ctx=c.getContext('2d');ctx.drawImage(context,0,0);const b=row.context_box_source_xyxy;
+  for(const [box,color] of [[row.annotation_box_source_xyxy,'cyan'],[row.original_crop_box_source_xyxy,'#ff4545']]){ctx.strokeStyle=color;ctx.lineWidth=3;ctx.strokeRect(box[0]-b[0],box[1]-b[1],box[2]-box[0],box[3]-box[1]);}
+  status(saved?'Učitana je tvoja ručna kontura.':'Početni poligon je prazan — crtaj neovisno.');updateProgress();
+ }catch(error){status(error.message,true);}
+}
+$('editor').onpointerdown=e=>{if(!original||busy)return;const p=point(e),q=pixel(e);$('editor').setPointerCapture(e.pointerId);
+ if(e.button===1||(e.button===0&&space)){drag={type:'pan',x:q[0],y:q[1],ox,oy};e.preventDefault();return;}
+ if(e.button!==0)return;if(closed){const vertex=points.findIndex(v=>Math.hypot(v[0]-p[0],v[1]-p[1])*scale<10);if(vertex>=0)drag={type:'vertex',vertex};return;}
+ if(p[0]>=0&&p[1]>=0&&p[0]<original.width&&p[1]<original.height){const last=points[points.length-1];if(last&&last[0]===p[0]&&last[1]===p[1])return;if(points.length>=3&&Math.hypot(p[0]-points[0][0],p[1]-points[0][1])*scale<8){close();return;}points.push(p);changed();}};
+$('editor').onpointermove=e=>{if(!drag||!original)return;if(drag.type==='pan'){const q=pixel(e);ox=drag.ox+q[0]-drag.x;oy=drag.oy+q[1]-drag.y;draw();}else{const p=point(e);if(p[0]>=0&&p[1]>=0&&p[0]<original.width&&p[1]<original.height){points[drag.vertex]=p;changed();}}};
+$('editor').onpointerup=()=>{const edited=drag?.type==='vertex';drag=null;if(edited&&closed&&dirty&&data.options?.autosave_on_close)save(false);};$('editor').onpointercancel=()=>drag=null;
+$('editor').oncontextmenu=e=>{e.preventDefault();undo();};
+$('editor').addEventListener('wheel',e=>{if(!original)return;e.preventDefault();const q=pixel(e),p=point(e);scale=Math.max(.15,Math.min(30,scale*Math.exp(-e.deltaY*.001)));ox=q[0]-p[0]*scale;oy=q[1]-p[1]*scale;draw();},{passive:false});
+function undo(){if(busy)return;closed=false;points.pop();changed();}function close(){if(busy)return;if(points.length>=3){closed=true;changed();if(data.options?.autosave_on_close)save(true);}}
+$('close').onclick=close;$('undo').onclick=undo;$('reset').onclick=fit;$('clear').onclick=()=>{if(points.length&&!confirm('Obrisati trenutni poligon na platnu? Spremljene revizije ostaju.'))return;points=[];closed=false;changed();};
+$('guide').onclick=()=>{guide=!guide;$('guide').textContent=guide?'Sakrij okvir cilja':'Prikaži okvir cilja';draw();};$('notes').oninput=()=>{dirty=true;draw();};
+async function save(advance=true){if(busy||!closed||!original)return;busy=true;draw();status('Spremanje ručne konture…');
+  try{data=await request('/api/annotation',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index,points,notes:$('notes').value})});dirty=false;busy=false;updateProgress();status('Spremljeno.');if(advance&&data.next_pending!==null)await show(data.next_pending);else{draw();if(data.next_pending===null)status(`Svih ${data.cases.length} ručnih kontura je spremljeno.`);}}
+ catch(error){busy=false;draw();status('Nije spremljeno: '+error.message,true);}}
+$('save').onclick=()=>save(true);$('prev').onclick=()=>show(Math.max(0,index-1));$('next').onclick=()=>show(Math.min(data.cases.length-1,index+1));$('pending').onclick=()=>{if(data.next_pending!==null)show(data.next_pending);};$('case').onchange=e=>show(Number(e.target.value));
+function paintReferences(){if(!references)return;const [raw,...masks]=references;for(let i=0;i<2;i++){const c=$('ref'+(i+5)),ctx=c.getContext('2d');c.width=raw.width;c.height=raw.height;
+ if($('referenceMode').value==='mask'){ctx.drawImage(masks[i],0,0);continue;}
+ ctx.drawImage(raw,0,0);const buffer=document.createElement('canvas');buffer.width=c.width;buffer.height=c.height;const bc=buffer.getContext('2d');bc.drawImage(masks[i],0,0);const pixels=bc.getImageData(0,0,c.width,c.height).data,over=ctx.getImageData(0,0,c.width,c.height);
+ const inside=(x,y)=>x>=0&&y>=0&&x<c.width&&y<c.height&&pixels[(y*c.width+x)*4]>0;
+ for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++)if(inside(x,y)&&(!inside(x-1,y)||!inside(x+1,y)||!inside(x,y-1)||!inside(x,y+1))){const n=(y*c.width+x)*4;over.data[n]=255;over.data[n+1]=215;over.data[n+2]=0;}ctx.putImageData(over,0,0);
+ }}
+$('referenceDetails').ontoggle=async()=>{if(!$('referenceDetails').open)return;const token=serial;try{const loaded=await Promise.all(['original','v5','v7'].map(kind=>image(`/asset?index=${index}&kind=${kind}`)));if(token!==serial)return;references=loaded;$('raw').src=loaded[0].src;paintReferences();}catch(error){status(error.message,true);}};
+$('referenceMode').onchange=paintReferences;
+window.onkeydown=e=>{if(['TEXTAREA','INPUT','SELECT'].includes(e.target.tagName))return;if(e.code==='Space'){space=true;e.preventDefault();}if(e.key==='Enter'){e.preventDefault();close();}if(e.key.toLowerCase()==='z'){e.preventDefault();undo();}if(e.key.toLowerCase()==='s'){e.preventDefault();save();}};window.onkeyup=e=>{if(e.code==='Space')space=false;};window.onblur=()=>{space=false;drag=null;};window.onbeforeunload=e=>{if(dirty){e.preventDefault();e.returnValue='';}};
+(async()=>{try{data=await request('/api/state');document.title=data.options?.title||'Ruler reference annotation';const raw=data.options?.annotation_mode==='ORIGINAL_RAW_CROP';guide=!raw;$('guide').textContent=guide?'Sakrij okvir cilja':'Prikaži okvir cilja';$('imageTitle').textContent=raw?'Originalni raw crop — bez predikcija':'Čista proširena slika — crtaj od nule';$('imageHelp').textContent=raw?'Slika za ocrtavanje identična je izvornom raw cropu, u njegovim pikselnim koordinatama. Ako primijetiš odrezano ili nejasno tijelo, nemoj spremati djelomičnu oznaku; javi source ID i detection ID.':'Ako raw crop prikazuje samo dio jedinke, prati cijelo tijelo u proširenoj čistoj slici.';if(data.options?.autosave_on_close){$('close').textContent='Zatvori, automatski spremi i nastavi (Enter)';}for(let i=0;i<data.cases.length;i++){const option=document.createElement('option');option.value=i;$('case').append(option);}updateProgress();await show(data.next_pending??0);}catch(error){status(error.message,true);}})();
+</script></html>

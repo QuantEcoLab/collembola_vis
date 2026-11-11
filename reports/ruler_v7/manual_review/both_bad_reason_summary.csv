@@ -1,0 +1,7 @@
+scope,source_id,eligible_total,selected_count,reviewed_count,pending_count,CROP_CUTS_BODY,RULER_INCLUDED,BODY_PART_MISSING,MULTIPLE_PROBLEMS,UNCLEAR
+sample,ALL,57,15,15,0,0,0,8,7,0
+sample,C_1_2_Collembola005,17,3,3,0,0,0,2,1,0
+sample,C_1_3_Collembola006,28,3,3,0,0,0,1,2,0
+sample,C_3_2_Collembola011,6,3,3,0,0,0,2,1,0
+sample,C_4_1_PS_500-1000_014,3,3,3,0,0,0,1,2,0
+sample,C_5_1_PS_500-1000_017,3,3,3,0,0,0,2,1,0
