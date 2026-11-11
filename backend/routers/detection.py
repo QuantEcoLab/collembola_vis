@@ -23,6 +23,9 @@ class DetectionRequest(BaseModel):
     iou: float | None = None
     tile_size: int | None = None
     overlap: int | None = None
+    extra_tile_sizes: list[int] | None = None
+    extra_conf: list[float] | None = None
+    contain: float | None = None
     device: str | None = None
 
 
@@ -45,6 +48,14 @@ async def run_detection(req: DetectionRequest):
         params["tile_size"] = req.tile_size
     if req.overlap is not None:
         params["overlap"] = req.overlap
+    if req.extra_tile_sizes is not None:
+        params["extra_tile_sizes"] = req.extra_tile_sizes
+    if req.extra_conf is not None:
+        params["extra_conf"] = req.extra_conf
+    if (req.extra_tile_sizes is None) != (req.extra_conf is None) or len(req.extra_tile_sizes or []) != len(req.extra_conf or []):
+        raise HTTPException(422, "extra_tile_sizes and extra_conf must be given together, one confidence per tile size")
+    if req.contain is not None:
+        params["contain"] = req.contain
     if req.device is not None:
         params["device"] = req.device
 

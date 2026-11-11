@@ -220,9 +220,11 @@ def run_contours(job: Job, progress_callback):
     detector_job = job_manager.get(job.params.get("detection_job_id", "")) if job.params.get("detection_job_id") else None
     if detector_job is None and not job.params.get("detections_csv"):
         detector_id = uuid.uuid4().hex[:12]
-        params = {"image_path": job.params["image_path"], "model_path": str(settings.default_model),
+        # exp03 keeps the detector it was validated with (legacy model, 1280 tiles, no extra pass).
+        params = {"image_path": job.params["image_path"], "model_path": str(settings.legacy_model),
                   "conf": legacy.PARAMS["detector_conf"], "iou": legacy.PARAMS["bbox_nms_iou"],
-                  "tile_size": legacy.PARAMS["tile_size"], "overlap": legacy.PARAMS["overlap"], "device": legacy.PARAMS["device"]}
+                  "tile_size": legacy.PARAMS["tile_size"], "overlap": legacy.PARAMS["overlap"], "device": legacy.PARAMS["device"],
+                  "extra_tile_sizes": [], "extra_conf": [], "contain": None}
         detected = run_detection(Job(id=detector_id, type=JobType.DETECTION, params=params),
                                  lambda p, m: progress_callback(p * .35, m))
         detector_job = job_manager.register_completed(JobType.DETECTION, params, detected, job_id=detector_id)
@@ -238,7 +240,12 @@ def run_contours(job: Job, progress_callback):
     rows = []
     mask_dir = output / "masks"
     mask_dir.mkdir(exist_ok=True)
-    detector_hash = file_sha256(settings.default_model)
+    from backend.services.detection import recorded_profile
+    if detector_job is not None:
+        detector_path = Path(recorded_profile(detector_job)["model_path"])
+    else:
+        detector_path = settings.default_model
+    detector_hash = file_sha256(detector_path)
     dedup_hash = file_sha256(legacy.DEDUP_MODEL)
     for index, detection in enumerate(detections):
         bbox = tuple(float(detection[key]) for key in ["x1", "y1", "x2", "y2"])
@@ -282,10 +289,11 @@ def run_contours(job: Job, progress_callback):
                 "annotations_sha256": job.params.get("annotations_sha256"),
                 "detections": len(rows), "without_mask": sum(not row["has_mask"] for row in rows),
                 "removed_duplicates": len(rows) - len(kept_ids), "kept_boxes": len(kept_ids),
-                "detector_sha256": detector_hash, "dedup_sha256": dedup_hash}
+                "detector_sha256": detector_hash, "dedup_sha256": dedup_hash,
+                "detector_profile": recorded_profile(detector_job) if detector_job is not None else None}
     result = _write_measurements(job, records, contours, overlay_path, detector_job.id if detector_job else None, metadata,
                                  lambda p, m: progress_callback(.9 + .08 * p, m))
-    if file_sha256(checkpoint) != EXP03_SHA256 or file_sha256(settings.default_model) != detector_hash or file_sha256(legacy.DEDUP_MODEL) != dedup_hash:
+    if file_sha256(checkpoint) != EXP03_SHA256 or file_sha256(detector_path) != detector_hash or file_sha256(legacy.DEDUP_MODEL) != dedup_hash:
         raise RuntimeError("Hash modela ili classifiera promijenjen je tijekom obrade.")
     progress_callback(1., "Konture i mjerenja exp03_no_os su dovršeni.")
     return result

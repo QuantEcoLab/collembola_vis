@@ -17,12 +17,24 @@ class Settings(BaseSettings):
     detector_dataset_dir: Path = Path("data/curated_detector")
     detector_split_registry: Path = Path("data/detector_split_registry.json")
 
-    # Model defaults
-    default_model: Path = Path("models/yolo11n_tiled_best.pt")
-    default_conf: float = 0.6
+    # Standard detection profile. The detector is the production model fine-tuned on reviewed and
+    # visually verified Pendifin (CAC/ERD) train plates; it runs on 1280 tiles, followed by global NMS
+    # and suppression of fragment boxes lying >= default_contain inside a larger box. Optional extra
+    # tile passes (e.g. 640 px tiles seen 2x upscaled) are supported but off by default. The weights
+    # are not in git: copy them to default_model before deploying (see docs/DETECTION_RECALL.md).
+    default_model: Path = Path("models/yolo11n_tiled_pendifin_v1.pt")
+    default_conf: float = 0.4
     default_iou: float = 0.5
     default_tile_size: int = 1280
     default_overlap: int = 256
+    default_extra_tile_sizes: list[int] = []
+    default_extra_conf: list[float] = []
+    default_contain: float | None = 0.8
+
+    # Legacy detector (until 2026-11): conf 0.6, 1280 tiles only, no fragment suppression. Detection
+    # jobs created before the profile was recorded used it, and the exp03 contour pipeline keeps it
+    # for its own detector run.
+    legacy_model: Path = Path("models/yolo11n_tiled_best.pt")
 
     # Experimental contour workflow; production detector/model defaults above stay intact.
     exp03_checkpoint: Path = Path(

@@ -13,6 +13,7 @@ from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import Job, JobType
 from backend.services.cuda_guard import ensure_inference_device
+from backend.services.detection import detection_profile
 from backend.services.image_identity import capture_identity
 
 
@@ -35,6 +36,7 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
     total = len(image_entries)
     device = params.get("device", settings.default_device)
     ensure_inference_device(device)
+    profile = detection_profile(params)
 
     results = []
 
@@ -57,14 +59,17 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
             identity = capture_identity(image_id, image_path)
             detections = infer_tiled(
                 image_path=image_path,
-                model_path=params.get("model_path", str(settings.default_model)),
-                tile_size=params.get("tile_size", settings.default_tile_size),
-                overlap=params.get("overlap", settings.default_overlap),
-                conf_threshold=params.get("conf", settings.default_conf),
-                iou_threshold=params.get("iou", settings.default_iou),
+                model_path=profile["model_path"],
+                tile_size=profile["tile_size"],
+                overlap=profile["overlap"],
+                conf_threshold=profile["conf"],
+                iou_threshold=profile["iou"],
                 output_dir=str(output_dir),
                 device=device,
                 progress_callback=None,
+                extra_tile_sizes=profile["extra_tile_sizes"],
+                extra_conf_thresholds=profile["extra_conf"],
+                contain_threshold=profile["contain"],
             )
 
             image_stem = image_path.stem
@@ -88,6 +93,7 @@ def run_batch_detection(job: Job, progress_callback) -> dict[str, Any]:
                     "metadata_path": str(metadata_path),
                     "image_path": str(image_path),
                     "image_stem": image_stem,
+                    "detector_profile": profile,
                 },
                 job_id=det_job_id,
             )

@@ -4,7 +4,7 @@ import { LogOut, ChevronLeft, ChevronRight, Table2, MousePointer2, Square, XCirc
 import ImageUploader from '../components/ImageUploader'
 import ImageViewer from '../components/ImageViewer'
 import BboxOverlay from '../components/BboxOverlay'
-import { AdvancedDetectionModal } from '../components/AdvancedDetectionModal'
+import { AdvancedDetectionModal, STANDARD_CONF } from '../components/AdvancedDetectionModal'
 import { ViewerToolbar, type OverlayMode } from '../components/ViewerToolbar'
 import { MeasurementModal } from '../components/MeasurementModal'
 import { WorkspaceSidebar } from '../components/WorkspaceSidebar'
@@ -76,7 +76,9 @@ export default function WorkspacePage() {
   const [calibrationError, setCalibrationError] = useState<string | null>(null)
   const [calibrationMessage, setCalibrationMessage] = useState<string | null>(null)
   // ── Detection ───────────────────────────────────────────────────────
-  const [conf] = useState(0.6)
+  // Initial value of the advanced dialog only; the standard run sends no thresholds so the backend's
+  // detection profile (fine-tuned detector, extra 640-tile pass, fragment suppression) applies.
+  const [conf] = useState(STANDARD_CONF)
   const [tileSize] = useState(1280)
   const [overlap] = useState(256)
   const [device] = useState('0')
@@ -536,13 +538,7 @@ export default function WorkspacePage() {
           overlap: config.overlap,
           device: config.device === 'auto' ? '0' : config.device,
         }
-      : {
-          conf,
-          iou: 0.5,
-          tile_size: tileSize,
-          overlap,
-          device,
-        }
+      : { device }
 
     try {
       const res = await runDetection({

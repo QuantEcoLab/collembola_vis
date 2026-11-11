@@ -17,10 +17,13 @@ interface AdvancedDetectionModalProps {
   initialConfig?: Partial<DetectionConfig>;
 }
 
+/** Confidence of the standard detection profile's 1280-tile pass (backend settings.default_conf). */
+export const STANDARD_CONF = 0.4
+
 const DEFAULT_CONFIG: DetectionConfig = {
   tileSize: 1280,
   overlap: 256,
-  confidence: 0.6,
+  confidence: STANDARD_CONF,
   iouThreshold: 0.5,
   device: 'auto',
 };
@@ -175,8 +178,9 @@ export function AdvancedDetectionModal({
               <p className="text-sm text-red-600 mt-1">{errors.confidence}</p>
             )}
             <p className="text-xs text-gray-500 mt-1">
-              Minimum confidence for detections. Default: 0.60. Lower = more detections but more
-              false positives.
+              Minimum confidence for detections on the main tiles. Default: {STANDARD_CONF.toFixed(2)}.
+              Lower = more detections but more false positives. Fragment boxes inside a larger box
+              are always removed.
             </p>
           </div>
 

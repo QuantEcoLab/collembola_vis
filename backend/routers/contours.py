@@ -14,6 +14,7 @@ from backend.config import settings
 from backend.jobs.manager import job_manager
 from backend.jobs.models import JobStatus, JobType
 from backend.services.contours import MODEL_NAME, EXP03_SHA256, validate_checkpoint, annotation_snapshot, find_saved_source
+from backend.services.detection import detection_profile, legacy_profile, recorded_profile, same_profile
 from backend.services.centerline_measurement import METHOD
 from backend.services.image import get_image_info
 
@@ -89,20 +90,15 @@ async def run_contours(req: ContourRequest):
         path = Path(detection.result.get("csv_path", "")).resolve()
         if not path.is_relative_to(settings.outputs_dir.resolve()) or not path.is_file():
             raise HTTPException(400, "Nedostaje izvorni CSV detekcija.")
-        expected = {"conf": .6, "iou": .5, "tile_size": 1280, "overlap": 256}
-        provenance = dict(detection.params)
-        if not provenance:
+        metadata = None
+        if not detection.result.get("detector_profile") and not detection.params:
             metadata_path = Path(detection.result.get("metadata_path", "")).resolve()
             if not metadata_path.is_relative_to(settings.outputs_dir.resolve()) or not metadata_path.is_file():
                 raise HTTPException(400, "Nije moguće potvrditi parametre starih detekcija; ponovite standardnu detekciju.")
             metadata = json.loads(metadata_path.read_text())
-            provenance = {"conf": metadata.get("conf_threshold"), "iou": metadata.get("iou_threshold"),
-                          "tile_size": metadata.get("tile_size"), "overlap": metadata.get("overlap"), "model_path": metadata.get("model_path")}
-        defaults = {"conf": settings.default_conf, "iou": settings.default_iou, "tile_size": settings.default_tile_size, "overlap": settings.default_overlap}
-        if any(provenance.get(k, defaults[k]) != v for k, v in expected.items()):
-            raise HTTPException(400, "Za exp03 koristite standardne detekcije (conf 0.6, IoU 0.5, tile 1280, overlap 256).")
-        if Path(provenance.get("model_path") or settings.default_model).resolve() != settings.default_model.resolve():
-            raise HTTPException(400, "Detekcije ne koriste postojeći zadani detector.")
+        profile = recorded_profile(detection, metadata)
+        if not (same_profile(profile, detection_profile({})) or same_profile(profile, legacy_profile())):
+            raise HTTPException(400, "Za exp03 koristite standardne detekcije (zadani detektor i zadane postavke).")
     if req.source_contour_job_id:
         source = job_manager.get(req.source_contour_job_id)
         if source is None or source.type not in (JobType.CONTOURS, JobType.MEASUREMENT) or source.status != JobStatus.COMPLETED or source.result.get("image_id") != req.image_id or source.result.get("model_name") != MODEL_NAME or source.result.get("checkpoint_sha256") != EXP03_SHA256:

@@ -39,46 +39,44 @@ def ultralytics_device(device):
     return device
 
 
+def tile_positions(img_w, img_h, tile_size=1280, overlap=256):
+    """Return the (x_start, y_start, x_end, y_end) grid used by ``tile_image``.
+
+    Tiles advance by ``tile_size - overlap``; the last tile in each row/column is
+    shifted back so that it ends exactly at the image border.
+    """
+    positions = []
+    stride = tile_size - overlap
+    y = 0
+    while y < img_h:
+        x = 0
+        y_end = min(y + tile_size, img_h)
+        y_start = max(0, y_end - tile_size) if y_end == img_h else y
+        while x < img_w:
+            x_end = min(x + tile_size, img_w)
+            x_start = max(0, x_end - tile_size) if x_end == img_w else x
+            positions.append((x_start, y_start, x_end, y_end))
+            if x_end == img_w:
+                break
+            x += stride
+        if y_end == img_h:
+            break
+        y += stride
+    return positions
+
+
 def tile_image(image_path, tile_size=1280, overlap=256):
     """
     Tile a large image into smaller overlapping tiles.
-    
+
     Returns:
         img: PIL Image
         tiles: List of (tile_img, x_offset, y_offset, tile_id)
     """
     img = Image.open(image_path)
-    img_w, img_h = img.size
-    
     tiles = []
-    stride = tile_size - overlap
-    
-    tile_id = 0
-    y = 0
-    y_end = 0
-    while y < img_h:
-        x = 0
-        x_end = 0
-        while x < img_w:
-            # Adjust tile boundaries at edges
-            x_end = min(x + tile_size, img_w)
-            y_end = min(y + tile_size, img_h)
-            x_start = max(0, x_end - tile_size) if x_end == img_w else x
-            y_start = max(0, y_end - tile_size) if y_end == img_h else y
-            
-            # Crop tile
-            tile = img.crop((x_start, y_start, x_end, y_end))
-            tiles.append((tile, x_start, y_start, tile_id))
-            tile_id += 1
-            
-            if x_end == img_w:
-                break
-            x += stride
-        
-        if y_end == img_h:
-            break
-        y += stride
-    
+    for tile_id, (x0, y0, x1, y1) in enumerate(tile_positions(*img.size, tile_size, overlap)):
+        tiles.append((img.crop((x0, y0, x1, y1)), x0, y0, tile_id))
     return img, tiles
 
 
@@ -135,6 +133,54 @@ def nms_global(detections, iou_threshold=0.5):
     return [detections[i] for i in keep]
 
 
+def suppress_contained(detections, contain_threshold=0.8):
+    """Drop fragment boxes: a box is removed when at least ``contain_threshold`` of its
+    area lies inside a larger box that is kept (largest boxes are considered first).
+
+    Tiled and multi-scale inference often returns a partial box on one animal next to the
+    full box (tile borders, body parts); NMS keeps both because their IoU is small.
+    """
+    if not detections or contain_threshold is None or contain_threshold >= 1:
+        return list(detections)
+    boxes = np.array([[d['x1'], d['y1'], d['x2'], d['y2']] for d in detections], dtype=float)
+    areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
+    kept = []
+    for i in np.argsort(-areas, kind='stable'):
+        if kept:
+            k = boxes[kept]
+            inter = (np.clip(np.minimum(k[:, 2], boxes[i, 2]) - np.maximum(k[:, 0], boxes[i, 0]), 0, None)
+                     * np.clip(np.minimum(k[:, 3], boxes[i, 3]) - np.maximum(k[:, 1], boxes[i, 1]), 0, None))
+            if areas[i] > 0 and (inter / areas[i]).max() >= contain_threshold:
+                continue
+        kept.append(i)
+    return [detections[i] for i in sorted(kept)]
+
+
+def detect_pass(model, img, tile_size, overlap, conf_threshold, model_device, pass_id=0, progress=None):
+    """Run the detector over one tile grid of ``img``; boxes in full-image pixels."""
+    detections = []
+    positions = tile_positions(*img.size, tile_size, overlap)
+    for tile_idx, (x0, y0, x1, y1) in enumerate(positions):
+        if progress:
+            progress(tile_idx, len(positions))
+        results = model(img.crop((x0, y0, x1, y1)), conf=conf_threshold, device=model_device, verbose=False)
+        for result in results:
+            boxes = result.boxes
+            for i in range(len(boxes)):
+                bx1, by1, bx2, by2 = boxes.xyxy[i].cpu().numpy()
+                detections.append({
+                    'x1': float(bx1 + x0),
+                    'y1': float(by1 + y0),
+                    'x2': float(bx2 + x0),
+                    'y2': float(by2 + y0),
+                    'conf': float(boxes.conf[i].cpu().numpy()),
+                    'class': int(boxes.cls[i].cpu().numpy()),
+                    'tile_id': tile_idx,
+                    'pass': pass_id,
+                })
+    return detections, len(positions)
+
+
 def infer_tiled(
     image_path,
     model_path,
@@ -144,7 +190,10 @@ def infer_tiled(
     iou_threshold=0.5,
     output_dir=None,
     device='0',
-    progress_callback=None
+    progress_callback=None,
+    extra_tile_sizes=None,
+    extra_conf_thresholds=None,
+    contain_threshold=None,
 ):
     """
     Run tiled inference on a large image.
@@ -159,6 +208,11 @@ def infer_tiled(
         output_dir: Output directory (default: infer_tiled_output)
         device: GPU device(s) to use
         progress_callback: Optional callable(progress: float, message: str) for progress updates
+        extra_tile_sizes: Optional further tile sizes run with the same model (e.g. [640]: the
+            model's 1280 input then sees each 640 tile upscaled 2x, which finds small juveniles)
+        extra_conf_thresholds: Confidence threshold for each extra tile size
+        contain_threshold: If set, drop boxes that lie at least this fraction inside a larger box
+            (fragment duplicates), applied after the global NMS
 
     Returns:
         detections: List of detection dictionaries
@@ -183,50 +237,40 @@ def infer_tiled(
     model = YOLO(model_path)
     model_device = ultralytics_device(device)
 
-    # Tile image
-    print(f"\nTiling image (tile_size={tile_size}, overlap={overlap})...")
+    # Tile sizes to run: the main grid plus optional extra scales
+    extra_tile_sizes = list(extra_tile_sizes or [])
+    extra_conf_thresholds = list(extra_conf_thresholds or [])
+    if len(extra_conf_thresholds) != len(extra_tile_sizes):
+        raise ValueError("extra_conf_thresholds needs one value per extra tile size")
+    passes = [(int(tile_size), float(conf_threshold))] + [
+        (int(t), float(c)) for t, c in zip(extra_tile_sizes, extra_conf_thresholds)]
+
     if progress_callback:
         progress_callback(0.04, "Tiling image...")
-    img, tiles = tile_image(image_path, tile_size, overlap)
+    img = Image.open(image_path)
+    img.load()
     img_w, img_h = img.size
-    n_tiles = len(tiles)
+    pass_tiles = [len(tile_positions(img_w, img_h, t, overlap)) for t, _ in passes]
+    total_tiles = sum(pass_tiles)
+    n_tiles = pass_tiles[0]
     print(f"Image size: {img_w}x{img_h}")
-    print(f"Created {n_tiles} tiles")
+    print(f"Tile passes (tile_size, conf): {passes}, overlap={overlap}, {total_tiles} tiles")
 
-    # Run detection on each tile
+    # Run detection on each tile of each pass
     print(f"\nRunning detection on tiles...")
     if progress_callback:
-        progress_callback(0.07, f"Running detection on {n_tiles} tiles...")
+        progress_callback(0.07, f"Running detection on {total_tiles} tiles...")
     all_detections = []
+    done = 0
+    for pass_id, (pass_tile, pass_conf) in enumerate(passes):
+        def progress(tile_idx, n, _done=done):
+            # Report progress (7% -> 87% across all tiles of all passes)
+            if progress_callback:
+                progress_callback(0.07 + 0.80 * ((_done + tile_idx) / total_tiles), f"Tile {_done + tile_idx + 1}/{total_tiles}")
+        dets, n = detect_pass(model, img, pass_tile, overlap, pass_conf, model_device, pass_id, progress)
+        all_detections.extend(dets)
+        done += n
 
-    for tile_idx, (tile_img, x_offset, y_offset, tile_id) in enumerate(tiles):
-        # Report progress (7% → 87% across tile loop)
-        if progress_callback:
-            progress_callback(0.07 + 0.80 * (tile_idx / n_tiles), f"Tile {tile_idx + 1}/{n_tiles}")
-
-        # Run YOLO on tile
-        results = model(tile_img, conf=conf_threshold, device=model_device, verbose=False)
-
-        # Convert to full image coordinates
-        for result in results:
-            boxes = result.boxes
-            for i in range(len(boxes)):
-                x1, y1, x2, y2 = boxes.xyxy[i].cpu().numpy()
-                conf = float(boxes.conf[i].cpu().numpy())
-                cls = int(boxes.cls[i].cpu().numpy())
-                
-                # Convert to full image coordinates
-                detection = {
-                    'x1': float(x1 + x_offset),
-                    'y1': float(y1 + y_offset),
-                    'x2': float(x2 + x_offset),
-                    'y2': float(y2 + y_offset),
-                    'conf': conf,
-                    'class': cls,
-                    'tile_id': tile_id
-                }
-                all_detections.append(detection)
-    
     print(f"Total detections before NMS: {len(all_detections)}")
 
     # Apply global NMS
@@ -234,7 +278,11 @@ def infer_tiled(
     if progress_callback:
         progress_callback(0.88, f"Applying NMS to {len(all_detections)} candidates...")
     final_detections = nms_global(all_detections, iou_threshold)
-    print(f"Final detections after NMS: {len(final_detections)}")
+    n_after_nms = len(final_detections)
+    print(f"Final detections after NMS: {n_after_nms}")
+    if contain_threshold is not None:
+        final_detections = suppress_contained(final_detections, contain_threshold)
+        print(f"After fragment suppression (contain >= {contain_threshold}): {len(final_detections)}")
 
     # Save to CSV
     csv_path = output_dir / f"{image_name}_detections.csv"
@@ -288,9 +336,14 @@ def infer_tiled(
         'overlap': overlap,
         'conf_threshold': conf_threshold,
         'iou_threshold': iou_threshold,
-        'num_tiles': len(tiles),
+        'num_tiles': n_tiles,
+        'extra_tile_sizes': [t for t, _ in passes[1:]],
+        'extra_conf_thresholds': [c for _, c in passes[1:]],
+        'contain_threshold': contain_threshold,
+        'num_tiles_all_passes': total_tiles,
         'detections_before_nms': len(all_detections),
-        'detections_after_nms': len(final_detections)
+        'detections_after_nms': n_after_nms,
+        'detections_final': len(final_detections)
     }
     
     metadata_path = output_dir / f"{image_name}_metadata.json"
@@ -328,7 +381,13 @@ if __name__ == '__main__':
                         help='Output directory')
     parser.add_argument('--device', type=str, default='0',
                         help='GPU device to use (default: 0)')
-    
+    parser.add_argument('--extra-tile-sizes', type=int, nargs='*', default=[],
+                        help='Extra tile sizes run with the same model, e.g. 640 (default: none)')
+    parser.add_argument('--extra-conf', type=float, nargs='*', default=[],
+                        help='Confidence threshold for each extra tile size')
+    parser.add_argument('--contain', type=float, default=None,
+                        help='Drop boxes lying at least this fraction inside a larger box, e.g. 0.8 (default: off)')
+
     args = parser.parse_args()
     
     infer_tiled(
@@ -339,5 +398,8 @@ if __name__ == '__main__':
         conf_threshold=args.conf,
         iou_threshold=args.iou,
         output_dir=args.output,
-        device=args.device
+        device=args.device,
+        extra_tile_sizes=args.extra_tile_sizes,
+        extra_conf_thresholds=args.extra_conf,
+        contain_threshold=args.contain,
     )

@@ -120,7 +120,8 @@ describe('Workspace boxes always belong to the photo being displayed', () => {
     await waitFor(() => expect(screen.getByTestId('boxes')).toHaveAttribute('data-ids', 'b-1,b-2,b-3'))
 
     fireEvent.click(screen.getByRole('button', { name: 'Re-run Detection' }))
-    await waitFor(() => expect(api.runDetection).toHaveBeenCalledWith(expect.objectContaining({ image_id: 'imgB', device: '0' })))
+    // The standard run sends no thresholds: the backend's detection profile applies.
+    await waitFor(() => expect(api.runDetection).toHaveBeenCalledWith({ image_id: 'imgB', device: '0' }))
     act(() => useJobStore.getState().updateJob(job('detFail', 'detection', 'failed', {}, "ValueError: Invalid CUDA 'device=0' requested.")))
     await waitFor(() => expect(screen.getByTestId('boxes')).toHaveAttribute('data-ids', 'b-1,b-2,b-3'))
     expect(screen.getByTestId('image-viewer')).toHaveAttribute('data-src', 'blob:contourB2')

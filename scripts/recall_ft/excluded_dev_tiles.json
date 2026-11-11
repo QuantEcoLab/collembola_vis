@@ -1,0 +1,89 @@
+{
+ "description": "1024x1024 dev tiles (my exhaustive labels, train split fold B) kept out of the final training set",
+ "tiles": [
+  {
+   "tile_id": "CAC_PDF_C1_3_008_t0",
+   "stem": "CAC_PDF_C1_3_008",
+   "x0": 5475,
+   "y0": 7245,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C1_3_008_t1",
+   "stem": "CAC_PDF_C1_3_008",
+   "x0": 525,
+   "y0": 2803,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C2_3_013_t0",
+   "stem": "CAC_PDF_C2_3_013",
+   "x0": 4732,
+   "y0": 7671,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C2_3_013_t1",
+   "stem": "CAC_PDF_C2_3_013",
+   "x0": 1127,
+   "y0": 4370,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C3_3_018_t0",
+   "stem": "CAC_PDF_C3_3_018",
+   "x0": 7692,
+   "y0": 2727,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C3_3_018_t1",
+   "stem": "CAC_PDF_C3_3_018",
+   "x0": 3218,
+   "y0": 2506,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C4_3_023_t0",
+   "stem": "CAC_PDF_C4_3_023",
+   "x0": 6778,
+   "y0": 2294,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C4_3_023_t1",
+   "stem": "CAC_PDF_C4_3_023",
+   "x0": 9332,
+   "y0": 4006,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C5_3_028_t0",
+   "stem": "CAC_PDF_C5_3_028",
+   "x0": 4505,
+   "y0": 4541,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_C5_3_028_t1",
+   "stem": "CAC_PDF_C5_3_028",
+   "x0": 6597,
+   "y0": 5600,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_Ctrl_3_003_t0",
+   "stem": "CAC_PDF_Ctrl_3_003",
+   "x0": 4414,
+   "y0": 2011,
+   "size": 1024
+  },
+  {
+   "tile_id": "CAC_PDF_Ctrl_3_003_t1",
+   "stem": "CAC_PDF_Ctrl_3_003",
+   "x0": 8119,
+   "y0": 5721,
+   "size": 1024
+  }
+ ]
+}
