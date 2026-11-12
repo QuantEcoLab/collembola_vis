@@ -29,7 +29,7 @@ keeps the boxes of touching animals.
 
 | setting | value |
 |---|---|
-| `default_model` | `models/yolo11n_tiled_pendifin_v3.pt` (not in git, see Deployment) |
+| `default_model` | `models/yolo11n_tiled_pendifin_v3.pt` (force-tracked in git, see Deployment) |
 | `default_model_sha256` | `22e873ac...7f50c3`, checked at startup; the service does not start without the right file |
 | `default_conf` | 0.55 on 1280 tiles, overlap 256 |
 | `default_iou` | 0.5 global NMS |

@@ -72,8 +72,9 @@ def _repo_path(path: Path) -> Path:
 def validate_detector() -> Path:
     """Startup check: the standard detector weights are installed and are the expected build.
 
-    The weights are not in git; a deploy that forgets to copy them would otherwise fail every
-    standard detection (and the fine-tune default) at run time instead of at startup.
+    The weights are force-tracked in git, but a checkout that lacks them (or holds other weights
+    under that name) would otherwise fail every standard detection (and the fine-tune default) at
+    run time instead of at startup.
     """
     import hashlib
 

@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     # visually verified Pendifin (CAC/ERD) train plates with hard negatives (v3); it runs on 1280 tiles,
     # followed by global NMS and suppression of fragment boxes lying >= default_contain inside a larger
     # box. Optional extra tile passes (e.g. 640 px tiles seen 2x upscaled) are supported but off by
-    # default. The weights are not in git: install them at default_model before deploying; startup
-    # refuses a missing file or another hash (see docs/DETECTION_RECALL.md).
+    # default. The weights are force-tracked in git (*.pt is ignored); startup refuses a missing file or
+    # another hash (see docs/DETECTION_RECALL.md).
     default_model: Path = Path("models/yolo11n_tiled_pendifin_v3.pt")
     # Checked at startup (backend.services.detection.validate_detector); empty disables the hash check.
     default_model_sha256: str = "22e873acb6362ec9ac7d1fe712a31604f5df38281527a7623fd880f1e67f50c3"
