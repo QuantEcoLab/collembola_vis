@@ -27,7 +27,7 @@ import torch
 # Detector profiles for the command line (--profile). The web backend's defaults (backend/config.py) are
 # the "standard" profile; backend/tests/test_detection_profile.py keeps the two in sync.
 PROFILES = {
-    "standard": {"model": "models/yolo11n_tiled_pendifin_v2.pt", "tile_size": 1280, "overlap": 256, "conf": 0.55,
+    "standard": {"model": "models/yolo11n_tiled_pendifin_v3.pt", "tile_size": 1280, "overlap": 256, "conf": 0.35,
                  "iou": 0.5, "extra_tile_sizes": [], "extra_conf": [], "contain": 0.8, "contain_keep_confident": True},
     "legacy": {"model": "models/yolo11n_tiled_best.pt", "tile_size": 1280, "overlap": 256, "conf": 0.6,
                "iou": 0.5, "extra_tile_sizes": [], "extra_conf": [], "contain": None, "contain_keep_confident": False},

@@ -18,15 +18,15 @@ class Settings(BaseSettings):
     detector_split_registry: Path = Path("data/detector_split_registry.json")
 
     # Standard detection profile. The detector is the production model fine-tuned on reviewed and
-    # visually verified Pendifin (CAC/ERD) train plates with hard negatives (v2); it runs on 1280 tiles,
+    # visually verified Pendifin (CAC/ERD) train plates with hard negatives (v3); it runs on 1280 tiles,
     # followed by global NMS and suppression of fragment boxes lying >= default_contain inside a larger
     # box. Optional extra tile passes (e.g. 640 px tiles seen 2x upscaled) are supported but off by
     # default. The weights are not in git: install them at default_model before deploying; startup
     # refuses a missing file or another hash (see docs/DETECTION_RECALL.md).
-    default_model: Path = Path("models/yolo11n_tiled_pendifin_v2.pt")
+    default_model: Path = Path("models/yolo11n_tiled_pendifin_v3.pt")
     # Checked at startup (backend.services.detection.validate_detector); empty disables the hash check.
-    default_model_sha256: str = "6c1d003cbcd03988c01b46af917e2273b3282f445e710632e72dfad7c221f276"
-    default_conf: float = 0.55
+    default_model_sha256: str = "22e873acb6362ec9ac7d1fe712a31604f5df38281527a7623fd880f1e67f50c3"
+    default_conf: float = 0.35
     default_iou: float = 0.5
     default_tile_size: int = 1280
     default_overlap: int = 256

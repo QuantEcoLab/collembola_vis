@@ -25,10 +25,20 @@ the v1 detections on the same train images):
     animal) one extra 1280 tile is cut with the object at a seeded random position (hard negative).
 These extra tiles use their own random generator, so without --verified2 the v1 set is rebuilt exactly.
 
+v3 (models/yolo11n_tiled_pendifin_v3.pt) adds --verified3 verified_r3.json (round-3 visual checks of the v2
+detections on the same train images, including an audit of the round-2 dish-rim negatives):
+  * its "animal" objects become labels; a v1/v2 "uncertain" object overlapping one of them (IoU >= 0.5)
+    is no longer inpainted; its "uncertain" objects are inpainted like the v2 ones;
+  * "unnot" overturns a round-2 "not" (IoU >= 0.5): no hard-negative tile is cut for it (most of these
+    are animals lying on the dish-rim refraction band);
+  * its "not" objects get a hard-negative tile each, like the v2 ones.
+Without --verified3 the v2 set is rebuilt exactly.
+
 Usage:
   python scripts/recall_ft/build_dataset.py --split-file split.json --annotations-dir data/annotations \
       --uploads-dir data/uploads --out data/recall_ft_v1 [--orig data/yolo_tiled]
   v2: add --verified2 scripts/recall_ft/verified_r2.json
+  v3: add --verified2 scripts/recall_ft/verified_r2.json --verified3 scripts/recall_ft/verified_r3.json
 --orig adds the original training set (train + val dirs) to data.yaml so the model keeps working on
 the plates it was first trained on.
 """
@@ -184,6 +194,8 @@ def main():
     ap.add_argument("--uploads-dir", required=True)
     ap.add_argument("--verified", default=str(HERE / "verified_extras_v1.json"))
     ap.add_argument("--verified2", default=None, help="round-2 verified objects (v2), e.g. verified_r2.json")
+    ap.add_argument("--verified3", default=None, help="round-3 verified objects (v3), e.g. verified_r3.json; "
+                    "needs --verified2")
     ap.add_argument("--exclude-tiles", default=str(HERE / "excluded_dev_tiles.json"))
     ap.add_argument("--reps", default="1,2,3")
     ap.add_argument("--orig", default=None, help="original YOLO dataset dir (images/train, images/val)")
@@ -193,6 +205,9 @@ def main():
     reps = {int(x) for x in a.reps.split(",")}
     verified = json.load(open(a.verified))["images"]
     verified2 = json.load(open(a.verified2))["images"] if a.verified2 else {}
+    if a.verified3 and not a.verified2:
+        ap.error("--verified3 needs --verified2")
+    verified3 = json.load(open(a.verified3))["images"] if a.verified3 else {}
     excl = {}
     for t in json.load(open(a.exclude_tiles))["tiles"]:
         excl.setdefault(t["stem"], []).append((t["x0"], t["y0"], t["size"]))
@@ -217,6 +232,17 @@ def main():
             # An uncertain object touching a labelled animal is not inpainted (that would erase the animal).
             ign += [b[:4] for b in v2.get("uncertain", []) if overlap_small(b[:4], pos) <= 0.1]
             negs = [b[:4] for b in v2.get("not", [])]
+        if a.verified3:
+            v3 = verified3.get(e["stem"], {})
+            new_pos = [b[:4] for b in v3.get("animal", [])]
+            pos += new_pos
+            if new_pos:
+                ign = [b for b in ign if not iou_one(b, new_pos).max() >= 0.5]
+            ign += [b[:4] for b in v3.get("uncertain", []) if overlap_small(b[:4], pos) <= 0.1]
+            unnot = [b[:4] for b in v3.get("unnot", [])]
+            if unnot:
+                negs = [b for b in negs if not iou_one(b, unnot).max() >= 0.5]
+            negs += [b[:4] for b in v3.get("not", [])]
         pos = defrag(np.array(pos, float).reshape(-1, 4)).tolist()
         jobs.append((e["stem"], str(Path(a.uploads_dir) / e["image_id"] / e["filename"]), pos, ign, a.out, 1000 + i,
                      excl.get(e["stem"], []), negs))

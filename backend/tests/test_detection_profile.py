@@ -1,6 +1,8 @@
 """Standard detection profile: fine-tuned detector, extra 640-tile pass and fragment suppression."""
 import hashlib
 import json
+import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
@@ -235,3 +237,10 @@ def test_gpu_index_is_resolved_among_the_visible_gpus_without_touching_the_envir
     assert infer_module.ultralytics_device("0,1") == "0,1"  # multi-GPU strings are left to ultralytics
     monkeypatch.setattr(torch.cuda, "device_count", lambda: 0)
     assert infer_module.ultralytics_device("0") == "0"  # no GPU: ultralytics reports its usual error
+
+
+def test_frontend_standard_conf_matches_the_backend_default():
+    """The advanced detection dialog pre-fills the standard profile's confidence."""
+    src = (Path(__file__).resolve().parents[2] / "frontend/src/components/AdvancedDetectionModal.tsx").read_text()
+    found = re.search(r"export const STANDARD_CONF = ([0-9.]+)", src)
+    assert found and float(found.group(1)) == settings.default_conf

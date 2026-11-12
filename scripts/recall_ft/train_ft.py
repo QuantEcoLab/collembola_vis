@@ -10,7 +10,7 @@ is the GPU the web service uses). This script therefore requires CUDA_VISIBLE_DE
 initialises CUDA first so the visible GPU list is fixed for the process, and prints the physical
 GPU it trains on.
 
-v1 (models/yolo11n_tiled_pendifin_v1.pt) and v2 (models/yolo11n_tiled_pendifin_v2.pt) were trained
+v1, v2 and v3 (models/yolo11n_tiled_pendifin_v{1,2,3}.pt) were trained
 from models/yolo11n_tiled_best.pt with the defaults below (25 epochs, batch 4, imgsz 1280; about
 45 min on one Quadro RTX 8000); the weights are last.pt.
 """
