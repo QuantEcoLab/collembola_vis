@@ -18,7 +18,7 @@ interface AdvancedDetectionModalProps {
 }
 
 /** Confidence of the standard detection profile's 1280-tile pass (backend settings.default_conf). */
-export const STANDARD_CONF = 0.35
+export const STANDARD_CONF = 0.55
 
 const DEFAULT_CONFIG: DetectionConfig = {
   tileSize: 1280,

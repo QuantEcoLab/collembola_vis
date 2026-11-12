@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     default_model: Path = Path("models/yolo11n_tiled_pendifin_v3.pt")
     # Checked at startup (backend.services.detection.validate_detector); empty disables the hash check.
     default_model_sha256: str = "22e873acb6362ec9ac7d1fe712a31604f5df38281527a7623fd880f1e67f50c3"
-    default_conf: float = 0.35
+    default_conf: float = 0.55
     default_iou: float = 0.5
     default_tile_size: int = 1280
     default_overlap: int = 256
