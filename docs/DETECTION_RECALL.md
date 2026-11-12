@@ -279,15 +279,14 @@ re-freeze. That image is not in the headline tier.
 
 ## Deployment
 
-1. Install the weights at `models/yolo11n_tiled_pendifin_v3.pt` (sha256
+1. The weights are committed at `models/yolo11n_tiled_pendifin_v3.pt` (sha256
    `22e873acb6362ec9ac7d1fe712a31604f5df38281527a7623fd880f1e67f50c3`, also in
-   `backend/config.py` as `default_model_sha256`). The file is not in git yet (`*.pt`
-   is ignored; only `yolo11n_tiled_best.pt` is force-tracked). At the time of
-   writing, the build is at
-   `adeb:/home/adeb/agent-work/developer-recall/models/yolo11n_tiled_pendifin_v3.pt`.
-   That is a work directory, so force-add the file like `yolo11n_tiled_best.pt`. The service now refuses to start if the file is missing
-   or has a different hash. Before this check, a deploy without the file would
-   start and then fail every standard detection.
+   `backend/config.py` as `default_model_sha256`). `*.pt` is ignored, so the file is
+   force-tracked like `yolo11n_tiled_best.pt`, and a `git pull` brings it along. The
+   service refuses to start if the file is missing or has a different hash. Before
+   this check, a deploy without the file would start and then fail every standard
+   detection. If you replace the default detector, force-add the new weights
+   (`git add -f`) in the same commit as the config change.
 2. Keep `models/yolo11n_tiled_best.pt`, which is the legacy detector (old jobs, exp03).
 3. Restart the service. Speed is unchanged: it is the same network size on the
    same tiles.
